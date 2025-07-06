@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Processor for Eagle</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 헤더 -->
+        <header class="header">
+            <div class="logo">
+                <h1>🎬 Video Processor</h1>
+                <p>동영상 컷 변화 감지 및 추출 도구</p>
+            </div>
+        </header>
+
+        <!-- 메인 컨텐츠 -->
+        <main class="main-content">
+            <!-- 파일 선택 섹션 -->
+            <section class="file-selection">
+                <h2>📁 동영상 파일 선택</h2>
+                <div class="file-info">
+                    <div class="selected-file" id="selectedFile">
+                        <span class="placeholder">Eagle에서 동영상을 선택하세요</span>
+                    </div>
+                    <button class="btn btn-secondary" id="selectFileBtn">
+                        파일 선택
+                    </button>
+                </div>
+                <div class="batch-info" id="batchInfo" style="display: none;">
+                    <div class="batch-summary">
+                        <span class="batch-icon">📚</span>
+                        <span class="batch-text">배치 모드: <span id="batchCount">0</span>개 동영상 선택됨</span>
+                    </div>
+                    <div class="batch-list" id="batchList"></div>
+                </div>
+            </section>
+
+            <!-- 설정 섹션 -->
+            <section class="settings">
+                <h2>⚙️ 처리 설정</h2>
+                <div class="settings-grid">
+                    <div class="setting-group">
+                        <label for="sensitivity">컷 변화 민감도</label>
+                        <input type="range" id="sensitivity" min="0.1" max="0.7" step="0.1" value="0.3">
+                        <span class="setting-value" id="sensitivityValue">0.3</span>
+                        <div class="setting-description">
+                            <small>낮을수록 민감 (더 많은 컷 감지), 높을수록 둔감 (주요 컷만 감지)</small>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="imageFormat">이미지 포맷</label>
+                        <select id="imageFormat">
+                            <option value="jpg">JPG</option>
+                            <option value="png">PNG</option>
+                        </select>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="quality">출력 품질</label>
+                        <input type="range" id="quality" min="1" max="10" step="1" value="8">
+                        <span class="setting-value" id="qualityValue">8</span>
+                    </div>
+                    
+
+                    <div class="setting-group">
+                        <label for="extractionMethod">추출 방식</label>
+                        <select id="extractionMethod">
+                            <option value="unified">🚀 고속 병렬 방식 (최고 속도)</option>
+                            <option value="parallel">⚡ 안정 병렬 방식 (안정성 우선)</option>
+                        </select>
+                        <div class="setting-description">
+                            <small>고속: 최대 12개 동시 처리로 최고 속도 | 안정: 4개 동시 처리로 안정성 보장</small>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="duplicateHandling">중복 파일 처리</label>
+                        <select id="duplicateHandling">
+                            <option value="overwrite">🔄 덮어쓰기 (추천 - 빠름)</option>
+                            <option value="skip">⚠️ 건너뛰기 (안전)</option>
+                        </select>
+                        <div class="setting-description">
+                            <small>덮어쓰기: 중복 체크 없이 빠르게 임포트 | 건너뛰기: 중복 파일은 스킵</small>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="inHandle">In 포인트 핸들 (프레임)</label>
+                        <input type="range" id="inHandle" min="0" max="10" step="1" value="3">
+                        <span class="setting-value" id="inHandleValue">+3</span>
+                        <div class="setting-description">
+                            <small>컷 시작점에서 건너뛸 프레임 수 (기본: 3프레임 후부터 시작)</small>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="outHandle">Out 포인트 핸들 (프레임)</label>
+                        <input type="range" id="outHandle" min="0" max="10" step="1" value="3">
+                        <span class="setting-value" id="outHandleValue">-3</span>
+                        <div class="setting-description">
+                            <small>컷 끝점에서 제외할 프레임 수 (기본: 3프레임 전에 종료)</small>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+
+
+            <!-- 실행 버튼 섹션 -->
+            <section class="actions">
+                <h2>🚀 실행</h2>
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="extractFramesBtn">
+                        🖼️ 이미지 추출
+                    </button>
+                    <button class="btn btn-primary" id="extractClipsBtn">
+                        🎬 클립 추출
+                    </button>
+                    <button class="btn btn-success" id="processAllBtn">
+                        📋 모든 처리
+                    </button>
+                </div>
+            </section>
+
+            <!-- 진행 상황 섹션 -->
+            <section class="progress-section" id="progressSection" style="display: none;">
+                <h2>📊 진행 상황</h2>
+                <div class="batch-progress" id="batchProgress" style="display: none;">
+                    <div class="batch-progress-header">
+                        <div class="batch-progress-text">전체 진행률: <span id="batchCurrentFile">1</span> / <span id="batchTotalFiles">1</span> 파일</div>
+                        <button class="btn btn-secondary btn-sm" id="batchCancelBtn" style="display: none;">
+                            ❌ 취소
+                        </button>
+                    </div>
+                    <div class="progress-bar batch-bar">
+                        <div class="progress-fill batch-fill" id="batchProgressFill"></div>
+                    </div>
+                </div>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">대기 중...</div>
+                </div>
+                <div class="progress-details" id="progressDetails"></div>
+            </section>
+
+            <!-- 결과 섹션 -->
+            <section class="results" id="resultsSection" style="display: none;">
+                <h2>✅ 처리 결과</h2>
+                <div class="result-summary" id="resultSummary"></div>
+                <div class="result-actions">
+                    <button class="btn btn-secondary" id="openResultsBtn">
+                        📂 결과 폴더 열기
+                    </button>
+                </div>
+            </section>
+            
+            <!-- 배치 결과 섹션 -->
+            <section class="batch-results" id="batchResultsSection" style="display: none;">
+                <h2>📊 배치 처리 결과</h2>
+                <div class="batch-results-container" id="batchResultsList"></div>
+                <div class="result-actions">
+                    <button class="btn btn-secondary" id="openResultsBtn2" onclick="window.VideoProcessor.openResultsFolder()">
+                        📂 결과 폴더 열기
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- 푸터 -->
+        <footer class="footer">
+            <p>© 2025 greatminds | Video Processor for Eagle v1.3.0</p>
+        </footer>
+    </div>
+
+    <!-- 스크립트 -->
+    <script src="main.js"></script>
+</body>
+</html>

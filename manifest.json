@@ -1,0 +1,40 @@
+{
+  "id": "video-processor-eagle-plugin",
+  "version": "1.3.0",
+  "name": "Video Processor for Eagle",
+  "description": "동영상에서 컷 변화를 감지하여 이미지와 클립을 고속으로 추출하는 플러그인 (스마트 필터링 제거)",
+  "author": "슷터드 (greatminds)",
+  "logo": "assets/icons/logo.png",
+  "keywords": ["video", "cut", "detection", "frame", "extraction", "clip"],
+  "main": {
+    "url": "src/main.html",
+    "width": 320,
+    "height": 600,
+    "minWidth": 300,
+    "minHeight": 400,
+    "resizable": true,
+    "alwaysOnTop": true,
+    "frame": true,
+    "show": true,
+    "skipTaskbar": false,
+    "transparent": false,
+    "hasShadow": true
+  },
+  "devTools": true,
+  "dependencies": ["ffmpeg"],
+  "permissions": [
+    "file:read",
+    "file:write",
+    "library:read",
+    "library:write"
+  ],
+  "engines": {
+    "eagle": ">=4.0.0"
+  },
+  "categories": ["video", "productivity", "converter"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/greatminds/video-processor-eagle-plugin"
+  },
+  "license": "MIT"
+}
