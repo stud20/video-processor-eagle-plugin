@@ -330,19 +330,21 @@ class VideoAnalyzer {
     }
 
     /**
-     * 컷 포인트 정제 및 구간 생성 (프레임 단위 정확도)
-     * @param {Array} cutPoints - 원본 컷 포인트 배열 (초 단위)
+     * 컷 포인트 정제 및 구간 생성 (프레임 단위 정확도) - 수정됨
+     * @param {Array} cutPoints - 원본 컷 포인트 배열 (초 단위) - 장면 변화 지점들
      * @param {Object} videoInfo - 비디오 정보 객체
      * @param {number} inHandle - In 포인트 핸들 (프레임 수)
      * @param {number} outHandle - Out 포인트 핸들 (프레임 수)
      * @returns {Array} 정제된 컷 포인트 구간 배열
      */
     refineCutPointsFrameAccurate(cutPoints, videoInfo, inHandle = 3, outHandle = 3) {
-        console.log('컷 포인트 정제 시작 (프레임 단위):', { 
+        console.log('컷 포인트 정제 시작 (올바른 인아웃 적용):', { 
             cutPoints, 
             fps: videoInfo.fps,
             frameTime: videoInfo.frameTime,
-            totalDuration: videoInfo.duration 
+            totalDuration: videoInfo.duration,
+            inHandle,
+            outHandle
         });
         
         if (cutPoints.length === 0) {
@@ -354,65 +356,90 @@ class VideoAnalyzer {
         const fps = videoInfo.fps;
         const frameTime = videoInfo.frameTime;
         
-        // 컷 포인트를 프레임 번호로 변환
+        // 컷 포인트를 프레임 번호로 변환 (장면 변화 지점들)
         const cutFrames = cutPoints.map(time => Math.round(time * fps));
         
         // 중복 제거 및 정렬
         const uniqueCutFrames = [...new Set(cutFrames)].sort((a, b) => a - b);
         
-        console.log('컷 변화 프레임 번호:', uniqueCutFrames);
+        console.log('장면 변화 프레임 번호:', uniqueCutFrames);
         
-        // 각 컷 구간 생성
+        // 🎯 올바른 로직: 각 컷 포인트를 아웃점으로 사용
+        // 구간들: [0 ~ 첫컷], [첫컷 ~ 둘째컷], [둘째컷 ~ 셋째컷], ..., [마지막컷 ~ 끝]
+        
+        let previousCutFrame = 0; // 이전 컷 지점 (첫 번째는 비디오 시작)
+        
         for (let i = 0; i < uniqueCutFrames.length; i++) {
-            const currentCutFrame = uniqueCutFrames[i];
-            const nextCutFrame = i < uniqueCutFrames.length - 1 ? uniqueCutFrames[i + 1] : Math.floor(videoInfo.duration * fps);
+            const currentCutFrame = uniqueCutFrames[i]; // 현재 컷 변화 지점
             
-            // 컷이 바뀐 프레임에서 inHandle만큼 더한 프레임이 in점, 다음 컷에서 outHandle만큼 뺀 프레임이 out점
-            const inFrame = currentCutFrame + inHandle;
-            const outFrame = nextCutFrame - outHandle;
+            // 🎯 수정된 로직:
+            // 인점 = 이전 컷 지점 + inHandle
+            // 아웃점 = 현재 컷 지점 - outHandle
+            const inFrame = previousCutFrame + inHandle;
+            const outFrame = Math.max(currentCutFrame - outHandle, inFrame + Math.round(fps)); // 최소 1초 보장
             
             // 프레임을 시간으로 변환
             const inTime = inFrame * frameTime;
-            const outTime = (outFrame + 1) * frameTime; // out 프레임 포함
-            
+            const outTime = outFrame * frameTime;
             const duration = outTime - inTime;
             
-            // 최소 10프레임 이상의 구간만 포함
-            if (outFrame - inFrame >= 10) {
+            // 최소 1초 이상의 구간만 포함
+            if (duration >= 1.0 && outFrame > inFrame) {
                 refined.push({
                     start: inTime,
                     end: outTime,
                     duration: duration,
                     inFrame: inFrame,
                     outFrame: outFrame,
-                    frameCount: outFrame - inFrame + 1,
-                    index: refined.length
+                    frameCount: outFrame - inFrame,
+                    index: refined.length,
+                    // 이미지 추출용 중간 프레임 정보
+                    middleFrame: Math.round((inFrame + outFrame) / 2),
+                    middleTime: Math.round((inFrame + outFrame) / 2) * frameTime,
+                    // 디버깅 정보
+                    cutChangeFrame: currentCutFrame,
+                    cutChangeTime: currentCutFrame * frameTime
                 });
                 
-                console.log(`구간 ${refined.length}: 프레임 ${inFrame}-${outFrame} (시간: ${inTime.toFixed(3)}-${outTime.toFixed(3)}초)`);
+                console.log(`✅ 구간 ${refined.length}: 인점 프레임${inFrame}(${inTime.toFixed(3)}s) → 아웃점 프레임${outFrame}(${outTime.toFixed(3)}s) | 컷변화: 프레임${currentCutFrame} | 중간: 프레임${Math.round((inFrame + outFrame) / 2)}`);
+            } else {
+                console.log(`⚠️ 구간 스킵: 너무 짧음 - 인점 프레임${inFrame} → 아웃점 프레임${outFrame} (${duration.toFixed(2)}초)`);
             }
+            
+            // 다음 구간을 위해 이전 컷 지점 업데이트
+            previousCutFrame = currentCutFrame;
         }
         
-        // 첫 번째 컷 이전 구간 추가 (비디오 시작부터 첫 컷에서 outHandle만큼 뺀 프레임까지)
-        if (uniqueCutFrames.length > 0 && uniqueCutFrames[0] > (inHandle + outHandle + 10)) { // 최소 핸들 + 10프레임 이상
-            const firstCutFrame = uniqueCutFrames[0];
-            refined.unshift({
-                start: 0,
-                end: (firstCutFrame - outHandle) * frameTime,
-                duration: (firstCutFrame - outHandle) * frameTime,
-                inFrame: 0,
-                outFrame: firstCutFrame - outHandle,
-                frameCount: firstCutFrame - outHandle,
-                index: 0
+        // 마지막 구간: 마지막 컷부터 비디오 끝까지
+        const totalFrames = Math.floor(videoInfo.duration * fps);
+        const lastInFrame = previousCutFrame + inHandle;
+        const lastOutFrame = totalFrames - outHandle;
+        
+        if (lastOutFrame > lastInFrame && (lastOutFrame - lastInFrame) >= fps) { // 최소 1초
+            const lastInTime = lastInFrame * frameTime;
+            const lastOutTime = lastOutFrame * frameTime;
+            const lastDuration = lastOutTime - lastInTime;
+            
+            refined.push({
+                start: lastInTime,
+                end: lastOutTime,
+                duration: lastDuration,
+                inFrame: lastInFrame,
+                outFrame: lastOutFrame,
+                frameCount: lastOutFrame - lastInFrame,
+                index: refined.length,
+                // 이미지 추출용 중간 프레임 정보
+                middleFrame: Math.round((lastInFrame + lastOutFrame) / 2),
+                middleTime: Math.round((lastInFrame + lastOutFrame) / 2) * frameTime,
+                // 마지막 구간 표시
+                isLastSegment: true
             });
             
-            // 인덱스 재조정
-            for (let i = 1; i < refined.length; i++) {
-                refined[i].index = i;
-            }
+            console.log(`✅ 마지막 구간 ${refined.length}: 인점 프레임${lastInFrame}(${lastInTime.toFixed(3)}s) → 아웃점 프레임${lastOutFrame}(${lastOutTime.toFixed(3)}s) | 중간: 프레임${Math.round((lastInFrame + lastOutFrame) / 2)}`);
         }
         
-        console.log(`정제된 컷 포인트 구간: ${refined.length}개`);
+        console.log(`🎬 정제 완료: ${refined.length}개 구간, 올바른 인아웃점 적용`);
+        console.log('구간 요약:', refined.map(r => `[${r.inFrame}-${r.outFrame}]`).join(', '));
         
         // 여전히 비어있으면 기본 추출 사용
         if (refined.length === 0) {
