@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>FrameExtractor 테스트</title>
+</head>
+<body>
+    <h1>FrameExtractor 로드 테스트</h1>
+    <div id="result"></div>
+
+    <!-- 필수 모듈들을 순서대로 로드 -->
+    <script src="modules/common/eagle-utils.js"></script>
+    <script src="modules/common/config-manager.js"></script>
+    <!-- 테스트용 간단한 버전 -->
+    <script src="modules/frame-extractor-simple.js"></script>
+    
+    <script>
+        console.log('=== FrameExtractor 로드 테스트 시작 ===');
+        
+        // 즉시 체크
+        console.log('즉시 체크 - FrameExtractor:', typeof window.FrameExtractor);
+        
+        // 1초 후 체크
+        setTimeout(() => {
+            console.log('1초 후 체크 - FrameExtractor:', typeof window.FrameExtractor);
+            
+            const result = document.getElementById('result');
+            if (typeof window.FrameExtractor === 'function') {
+                result.innerHTML = '<p style="color: green;">✅ FrameExtractor 로드 성공!</p>';
+                console.log('✅ FrameExtractor 성공적으로 로드됨');
+                
+                // 클래스 인스턴스 생성 테스트
+                try {
+                    const extractor = new FrameExtractor();
+                    console.log('✅ FrameExtractor 인스턴스 생성 성공:', extractor);
+                    result.innerHTML += '<p style="color: blue;">📦 인스턴스 생성도 성공!</p>';
+                } catch (error) {
+                    console.error('❌ FrameExtractor 인스턴스 생성 실패:', error);
+                    result.innerHTML += '<p style="color: orange;">⚠️ 인스턴스 생성 실패: ' + error.message + '</p>';
+                }
+            } else {
+                result.innerHTML = '<p style="color: red;">❌ FrameExtractor 로드 실패</p>';
+                console.error('❌ FrameExtractor 로드 실패');
+                
+                // 디버깅 정보 수집
+                const debugInfo = {
+                    windowKeys: Object.keys(window).filter(k => k.includes('Extractor') || k.includes('Frame')),
+                    scriptTags: Array.from(document.querySelectorAll('script[src]')).map(s => ({
+                        src: s.src,
+                        loaded: s.readyState
+                    })),
+                    errors: window.onerror || 'No errors captured'
+                };
+                
+                console.log('디버깅 정보:', debugInfo);
+                result.innerHTML += '<pre style="color: red; font-size: 12px;">' + JSON.stringify(debugInfo, null, 2) + '</pre>';
+            }
+        }, 1000);
+        
+        // 스크립트 로드 이벤트 리스너 추가
+        document.addEventListener('DOMContentLoaded', () => {
+            const scripts = document.querySelectorAll('script[src*="frame-extractor"]');
+            scripts.forEach(script => {
+                script.addEventListener('load', () => {
+                    console.log('✅ frame-extractor.js 로드 완료');
+                });
+                script.addEventListener('error', (e) => {
+                    console.error('❌ frame-extractor.js 로드 오류:', e);
+                });
+            });
+        });
+        
+        // 전역 에러 캐처
+        window.addEventListener('error', (e) => {
+            if (e.filename && e.filename.includes('frame-extractor')) {
+                console.error('❌ frame-extractor.js 스크립트 오류:', {
+                    message: e.message,
+                    filename: e.filename,
+                    lineno: e.lineno,
+                    colno: e.colno
+                });
+            }
+        });
+    </script>
+</body>
+</html>
