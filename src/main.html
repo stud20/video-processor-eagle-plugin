@@ -55,7 +55,7 @@
                         <label for="imageFormat">이미지 포맷</label>
                         <select id="imageFormat">
                             <option value="jpg">JPG</option>
-                            <option value="png">PNG</option>
+                            <option value="png" selected>PNG</option>
                         </select>
                     </div>
                     
@@ -63,6 +63,36 @@
                         <label for="quality">출력 품질</label>
                         <input type="range" id="quality" min="1" max="10" step="1" value="8">
                         <span class="setting-value" id="qualityValue">8</span>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="analysisFrameNaming">
+                            <input type="checkbox" id="analysisFrameNaming">
+                            분석용 프레임 추출
+                        </label>
+                        <div class="setting-description">
+                            <small>파일명: [동영상명]+[시퀀스]+[시간비율].jpg<br>
+                            예: video_001_0.25.jpg (전체의 25% 지점)</small>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label for="smartFrameSelection">
+                            <input type="checkbox" id="smartFrameSelection" checked>
+                            🎯 스마트 프레임 선별 (AI 기반)
+                        </label>
+                        <div class="setting-description">
+                            <small>추출된 프레임을 AI로 분석하여 의미있는 대표 이미지만 선별</small>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group" id="smartSelectionOptions" style="display: block;">
+                        <label for="targetFrameCount">선별할 프레임 수</label>
+                        <input type="range" id="targetFrameCount" min="5" max="20" step="1" value="10">
+                        <span class="setting-value" id="targetFrameCountValue">10</span>
+                        <div class="setting-description">
+                            <small>최종적으로 선별할 대표 프레임의 개수</small>
+                        </div>
                     </div>
                     
 
@@ -127,6 +157,32 @@
                 </div>
             </section>
 
+            <!-- 캐시 관리 섹션 -->
+            <section class="cache-management">
+                <h2>🗑️ 캐시 관리</h2>
+                <div class="cache-info">
+                    <div class="cache-status">
+                        <div class="cache-path">
+                            <strong>동영상 클립:</strong> /Users/ysk/assets/temp/clips
+                        </div>
+                        <div class="cache-path">
+                            <strong>이미지 프레임:</strong> /Users/ysk/assets/temp/frame
+                        </div>
+                    </div>
+                    <div class="cache-actions">
+                        <button class="btn btn-warning" id="clearCacheBtn">
+                            🗑️ 캐시 지우기
+                        </button>
+                        <button class="btn btn-secondary" id="checkCacheBtn">
+                            📊 캐시 상태 확인
+                        </button>
+                    </div>
+                </div>
+                <div class="cache-result" id="cacheResult" style="display: none;">
+                    <div class="cache-result-content" id="cacheResultContent"></div>
+                </div>
+            </section>
+
             <!-- 진행 상황 섹션 -->
             <section class="progress-section" id="progressSection" style="display: none;">
                 <h2>📊 진행 상황</h2>
@@ -180,6 +236,51 @@
     </div>
 
     <!-- 스크립트 -->
+    <!-- 공통 유틸리티 모듈 먼저 로드 -->
+    <script src="modules/common/eagle-utils.js"></script>
+    <script src="modules/common/config-manager.js"></script>
+    
+    <!-- 처리 모듈들 로드 -->
+    <script src="modules/video-analyzer.js"></script>
+    <!-- 임시로 간단한 버전 사용 -->
+    <script src="modules/frame-extractor-simple.js"></script>
+    <script src="modules/clip-extractor.js"></script>
+    <script src="modules/eagle-importer.js"></script>
+    <script src="modules/smart-frame-selector.js"></script>
+    
+    <!-- 모듈 로드 완료 체크 스크립트 -->
+    <script>
+        // 모듈 로드 완료 확인
+        function waitForModules() {
+            return new Promise((resolve) => {
+                const checkModules = () => {
+                    const required = ['VideoAnalyzer', 'FrameExtractor', 'ClipExtractor', 'EagleImporter'];
+                    const loaded = required.filter(module => typeof window[module] === 'function');
+                    
+                    console.log('모듈 로드 상태:', {
+                        required: required.length,
+                        loaded: loaded.length,
+                        missing: required.filter(m => typeof window[m] !== 'function')
+                    });
+                    
+                    if (loaded.length === required.length) {
+                        console.log('✅ 모든 모듈 로드 완료');
+                        resolve();
+                    } else {
+                        setTimeout(checkModules, 100); // 100ms 후 재확인
+                    }
+                };
+                checkModules();
+            });
+        }
+        
+        // 모듈 로드 대기
+        waitForModules().then(() => {
+            console.log('🎯 모듈 로드 검증 완료, 메인 스크립트 로드 준비');
+        });
+    </script>
+    
+    <!-- 메인 스크립트 -->
     <script src="main.js"></script>
 </body>
 </html>

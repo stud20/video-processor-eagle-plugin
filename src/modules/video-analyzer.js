@@ -1,26 +1,81 @@
 /**
- * VideoAnalyzer - 비디오 분석 및 컷 변화 감지 모듈
+ * VideoAnalyzer - 비디오 분석 및 컷 변화 감지 모듈 (리팩토링 버전)
  * FFmpeg를 사용하여 동영상의 장면 변화를 감지합니다.
  */
 
-// 브라우저 환경에서 필요한 전역 변수들 (video-analyzer 전용)
-const fs_va = window.require ? window.require('fs') : null;
-const path_va = window.require ? window.require('path') : null;
-const { spawn: spawn_va } = window.require ? window.require('child_process') : { spawn: null };
-
 class VideoAnalyzer {
-    constructor(ffmpegPaths = null) {
-        this.tempDir = path_va ? path_va.join(__dirname, '../../assets/temp') : '/tmp/eagle-video-temp';
+    constructor(ffmpegPaths = null, options = {}) {
+        // 의존성 주입
+        this.eagleUtils = window.eagleUtils || null;
+        this.configManager = window.configManager || null;
+        
+        if (!this.eagleUtils || !this.configManager) {
+            console.warn('EagleUtils 또는 ConfigManager가 로드되지 않았습니다.');
+        }
+
+        // 설정 초기화
         this.ffmpegPaths = ffmpegPaths;
-        this.ensureTempDirectory();
+        this.options = {
+            enableCaching: true,
+            useFrameAccuracy: true,
+            ...options
+        };
+
+        // 임시 디렉토리는 동적으로 설정
+        this.tempDir = null;
+        this.initialized = false;
+    }
+
+    /**
+     * 초기화 (비동기)
+     */
+    async initialize() {
+        if (this.initialized) return;
+
+        try {
+            this.tempDir = this.eagleUtils ? 
+                await this.eagleUtils.getCacheDirectory('temp') :
+                this.getFallbackTempDir();
+
+            console.log('VideoAnalyzer 초기화 완료, 임시 디렉토리:', this.tempDir);
+            this.initialized = true;
+        } catch (error) {
+            console.error('VideoAnalyzer 초기화 실패:', error);
+            this.tempDir = this.getFallbackTempDir();
+            this.initialized = true;
+        }
+    }
+
+    /**
+     * 폴백 임시 디렉토리 생성
+     * @returns {string} 폴백 디렉토리 경로
+     */
+    getFallbackTempDir() {
+        const os = this.eagleUtils?.getNodeModule('os');
+        const path = this.eagleUtils?.getNodeModule('path');
+        
+        if (os && path) {
+            return path.join(os.tmpdir(), 'video-processor-temp');
+        }
+        return './temp';
     }
 
     /**
      * 임시 디렉토리 생성 확인
      */
-    ensureTempDirectory() {
-        if (fs_va && !fs_va.existsSync(this.tempDir)) {
-            fs_va.mkdirSync(this.tempDir, { recursive: true });
+    async ensureTempDirectory() {
+        if (!this.initialized) {
+            await this.initialize();
+        }
+
+        if (this.eagleUtils) {
+            await this.eagleUtils.ensureDirectory(this.tempDir);
+        } else {
+            // 폴백: 직접 디렉토리 생성
+            const fs = window.require ? window.require('fs') : null;
+            if (fs && !fs.existsSync(this.tempDir)) {
+                fs.mkdirSync(this.tempDir, { recursive: true });
+            }
         }
     }
 
@@ -79,19 +134,42 @@ class VideoAnalyzer {
     }
 
     /**
-     * 비디오 정보 가져오기
+     * 비디오 메타데이터 가져오기 (main.js 호환성)
+     * @param {string} videoPath - 비디오 파일 경로
+     * @returns {Promise<Object>} 비디오 메타데이터 객체
+     */
+    async getVideoMetadata(videoPath) {
+        return await this.getVideoInfo(videoPath);
+    }
+
+    /**
+     * 비디오 정보 가져오기 (리팩토링 버전)
      * @param {string} videoPath - 비디오 파일 경로
      * @returns {Promise<Object>} 비디오 정보 객체
      */
     async getVideoInfo(videoPath) {
         return new Promise((resolve, reject) => {
-            const ffprobe = spawn_va(this.ffmpegPaths.ffprobe, [
-                '-v', 'quiet',
-                '-print_format', 'json',
-                '-show_format',
-                '-show_streams',
-                videoPath
-            ]);
+            let ffprobe;
+            try {
+                ffprobe = this.eagleUtils ? 
+                    this.eagleUtils.spawn(this.ffmpegPaths.ffprobe, [
+                        '-v', 'quiet',
+                        '-print_format', 'json',
+                        '-show_format',
+                        '-show_streams',
+                        videoPath
+                    ]) :
+                    window.require('child_process').spawn(this.ffmpegPaths.ffprobe, [
+                        '-v', 'quiet',
+                        '-print_format', 'json',
+                        '-show_format',
+                        '-show_streams',
+                        videoPath
+                    ]);
+            } catch (error) {
+                reject(new Error(`FFprobe 프로세스 시작 실패: ${error.message}`));
+                return;
+            }
 
             let output = '';
             let error = '';
@@ -160,7 +238,15 @@ class VideoAnalyzer {
             
             console.log('FFmpeg 명령어:', this.ffmpegPaths.ffmpeg, args.join(' '));
 
-            const ffmpeg = spawn_va(this.ffmpegPaths.ffmpeg, args);
+            let ffmpeg;
+            try {
+                ffmpeg = this.eagleUtils ? 
+                    this.eagleUtils.spawn(this.ffmpegPaths.ffmpeg, args) :
+                    window.require('child_process').spawn(this.ffmpegPaths.ffmpeg, args);
+            } catch (error) {
+                reject(new Error(`FFmpeg 프로세스 시작 실패: ${error.message}`));
+                return;
+            }
             
             let stderr = '';
             let cutPoints = [];
