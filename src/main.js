@@ -841,11 +841,13 @@ async function refreshEagleLibrary() {
             }
         }
         
-        // 방법 3: 캠시 디렉토리에 있는 파일들 스캔
+        // 방법 3: 동적 캐시 디렉토리에 있는 파일들 스캔
         // Eagle이 Watch Folder를 통해 파일을 감지할 수 있도록 하기
         if (window.eagleUtils) {
-            const cacheDirectories = eagleUtils.getAllCacheDirectories();
-            console.log('✅ 자동 가져오기 폴더:', cacheDirectories);
+            const cacheDirectories = await eagleUtils.getAllCacheDirectories();
+            const currentLibPath = await eagleUtils.getLibraryPath();
+            const cacheInfo = currentLibPath ? 'Eagle 라이브러리 기반' : '폴백 경로';
+            console.log(`✅ 자동 가져오기 폴더 (${cacheInfo}):`, cacheDirectories);
             
             // 약간의 지연 후 Eagle이 파일을 감지하도록 함
             setTimeout(() => {
@@ -1695,7 +1697,7 @@ async function getFFmpegPaths() {
 // ===========================
 
 /**
- * 캐시 상태 확인
+ * 캐시 상태 확인 (동적 Eagle 라이브러리 경로 지원)
  */
 async function checkCacheStatus() {
     if (!window.eagleUtils) {
@@ -1709,7 +1711,10 @@ async function checkCacheStatus() {
     let totalFiles = 0;
     let totalSize = 0;
     
-    for (const dirPath of eagleUtils.getAllCacheDirectories()) {
+    // 동적으로 Eagle 라이브러리 기반 캐시 디렉토리 가져오기
+    const cacheDirectories = await eagleUtils.getAllCacheDirectories();
+    
+    for (const dirPath of cacheDirectories) {
         try {
             if (fs.existsSync(dirPath)) {
                 const files = fs.readdirSync(dirPath);
@@ -1736,7 +1741,13 @@ async function checkCacheStatus() {
             elements.cacheResultContent.innerHTML = '✅ 캐시가 비어있습니다.';
         } else {
             elements.cacheResult.className = 'cache-result warning';
-            elements.cacheResultContent.innerHTML = `📊 총 ${totalFiles}개 파일, ${eagleUtils.formatFileSize(totalSize)}`;
+            // 현재 사용 중인 캐시 경로 표시
+            const currentLibPath = await eagleUtils.getLibraryPath();
+            const cacheInfo = currentLibPath ? 
+                `Eagle 라이브러리 내 video-processor-cache` : 
+                `폴백 경로 (/Users/ysk/assets/temp)`;
+            
+            elements.cacheResultContent.innerHTML = `📊 총 ${totalFiles}개 파일, ${eagleUtils.formatFileSize(totalSize)}<br><small>📁 ${cacheInfo}</small>`;
         }
     }
 }
@@ -1790,14 +1801,15 @@ function openResultsFolder() {
             return;
         }
         
-        const directories = eagleUtils.getAllCacheDirectories();
+        const directories = await eagleUtils.getAllCacheDirectories();
         
         if (directories.length === 0) {
             alert('열 수 있는 결과 폴더가 없습니다.');
             return;
         }
         
-        const targetDir = directories[0]; // '/Users/ysk/assets/temp/clips'
+        // 동적 Eagle 라이브러리 기반 첫 번째 캐시 디렉토리 사용
+        const targetDir = directories[0];
         
         // Eagle Shell API 사용
         if (typeof eagle?.shell?.openPath !== 'undefined') {
