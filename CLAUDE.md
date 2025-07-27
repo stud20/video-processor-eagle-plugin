@@ -162,6 +162,35 @@ The codebase has been refactored to improve maintainability and structure:
 - Both old and new systems work together for compatibility
 - New modules are designed to be testable in isolation
 
+## Version History
+
+### v1.1.0 (2025-01-XX) - Advanced Video Processing Improvements
+**Major Features Added:**
+- **Dynamic Eagle Library Integration**: 현재 라이브러리 경로 기반 임시 폴더 자동 생성
+- **Automatic Import & Cleanup**: 처리 완료 후 자동 Eagle 임포트 및 임시 파일 정리
+- **Accurate Frame Extraction**: 키프레임 대신 정확한 프레임 추출 (Output Seeking) 전환
+- **Black Frame Prevention**: `-bf 0`, `-g 25`, `-sc_threshold 0` 등 블랙프레임 방지 FFmpeg 설정
+- **Enhanced Metadata**: 파일 타입별 구분된 태그 및 상세 주석 시스템
+
+**Technical Improvements:**
+- 하드코딩된 경로에서 동적 Eagle 라이브러리 경로로 전환
+- 스트림 복사에서 재인코딩으로 변경하여 정확성 향상
+- `-avoid_negative_ts make_zero` 제거로 블랙프레임 문제 해결
+- CRF 18 고정으로 일관된 고품질 출력
+- 오디오 스트림 복사로 처리 속도 향상
+
+**Files Modified:**
+- `src/modules/common/eagle-utils.js`: 동적 라이브러리 경로 시스템
+- `src/modules/eagle-importer.js`: 자동 임포트 및 정리 기능
+- `src/modules/clip-extractor.js`: 블랙프레임 방지 FFmpeg 설정
+- `src/modules/frame-extractor.js`: 정확한 추출 통일
+
+### v1.0.0 (2025-01-XX) - Initial Release
+**Base Features:**
+- 자동 컷 감지 및 클립/프레임 추출
+- Eagle 플러그인 통합
+- 모듈화된 아키텍처
+
 ## Development Status & Future Tasks
 
 ### ✅ Completed Features
