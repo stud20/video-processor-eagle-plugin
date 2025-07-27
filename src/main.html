@@ -25,9 +25,14 @@
                     <div class="selected-file" id="selectedFile">
                         <span class="placeholder">Eagle에서 동영상을 선택하세요</span>
                     </div>
-                    <button class="btn btn-secondary" id="selectFileBtn">
-                        파일 선택
-                    </button>
+                    <div class="file-buttons">
+                        <button class="btn btn-secondary" id="selectFileBtn">
+                            파일 선택
+                        </button>
+                        <button class="btn btn-outline" id="addVideoBtn">
+                            📝 리스트에 동영상 추가
+                        </button>
+                    </div>
                 </div>
                 <div class="batch-info" id="batchInfo" style="display: none;">
                     <div class="batch-summary">
@@ -43,8 +48,8 @@
                 <h2>⚙️ 처리 설정</h2>
                 <div class="settings-grid">
                     <div class="setting-group">
-                        <label for="sensitivity">컷 변화 민감도</label>
-                        <input type="range" id="sensitivity" min="0.1" max="0.7" step="0.1" value="0.3">
+                        <label for="sensitivitySlider">컷 변화 민감도</label>
+                        <input type="range" id="sensitivitySlider" min="0.1" max="0.7" step="0.1" value="0.3">
                         <span class="setting-value" id="sensitivityValue">0.3</span>
                         <div class="setting-description">
                             <small>낮을수록 민감 (더 많은 컷 감지), 높을수록 둔감 (주요 컷만 감지)</small>
@@ -52,16 +57,16 @@
                     </div>
                     
                     <div class="setting-group">
-                        <label for="imageFormat">이미지 포맷</label>
-                        <select id="imageFormat">
+                        <label for="formatSelect">이미지 포맷</label>
+                        <select id="formatSelect">
                             <option value="jpg">JPG</option>
                             <option value="png" selected>PNG</option>
                         </select>
                     </div>
                     
                     <div class="setting-group">
-                        <label for="quality">출력 품질</label>
-                        <input type="range" id="quality" min="1" max="10" step="1" value="8">
+                        <label for="qualitySlider">출력 품질</label>
+                        <input type="range" id="qualitySlider" min="1" max="10" step="1" value="8">
                         <span class="setting-value" id="qualityValue">8</span>
                     </div>
                     
@@ -119,8 +124,8 @@
                     </div>
                     
                     <div class="setting-group">
-                        <label for="inHandle">In 포인트 핸들 (프레임)</label>
-                        <input type="range" id="inHandle" min="0" max="10" step="1" value="3">
+                        <label for="inHandleSlider">In 포인트 핸들 (프레임)</label>
+                        <input type="range" id="inHandleSlider" min="0" max="10" step="1" value="3">
                         <span class="setting-value" id="inHandleValue">+3</span>
                         <div class="setting-description">
                             <small>컷 시작점에서 건너뛸 프레임 수 (기본: 3프레임 후부터 시작)</small>
@@ -128,8 +133,8 @@
                     </div>
                     
                     <div class="setting-group">
-                        <label for="outHandle">Out 포인트 핸들 (프레임)</label>
-                        <input type="range" id="outHandle" min="0" max="10" step="1" value="3">
+                        <label for="outHandleSlider">Out 포인트 핸들 (프레임)</label>
+                        <input type="range" id="outHandleSlider" min="0" max="10" step="1" value="3">
                         <span class="setting-value" id="outHandleValue">-3</span>
                         <div class="setting-description">
                             <small>컷 끝점에서 제외할 프레임 수 (기본: 3프레임 전에 종료)</small>
@@ -151,7 +156,10 @@
                     <button class="btn btn-primary" id="extractClipsBtn">
                         🎬 클립 추출
                     </button>
-                    <button class="btn btn-success" id="processAllBtn">
+                    <button class="btn btn-primary" id="concatVideosBtn">
+                        🔗 비디오 병합
+                    </button>
+                    <button class="btn btn-success" id="processBtn">
                         📋 모든 처리
                     </button>
                 </div>
@@ -242,45 +250,127 @@
     
     <!-- 처리 모듈들 로드 -->
     <script src="modules/video-analyzer.js"></script>
-    <!-- 임시로 간단한 버전 사용 -->
-    <script src="modules/frame-extractor-simple.js"></script>
+    <script src="modules/frame-extractor.js"></script>
     <script src="modules/clip-extractor.js"></script>
     <script src="modules/eagle-importer.js"></script>
     <script src="modules/smart-frame-selector.js"></script>
+    <script src="modules/video-concatenator.js"></script>
+    
+    <!-- Eagle 플러그인용 모듈 로더 -->
+    <script>
+        // Eagle 플러그인 환경에서 동적 스크립트 로드
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = () => {
+                    console.log(`✅ 스크립트 로드 완료: ${src}`);
+                    resolve();
+                };
+                script.onerror = () => {
+                    console.error(`❌ 스크립트 로드 실패: ${src}`);
+                    reject(new Error(`Failed to load ${src}`));
+                };
+                document.head.appendChild(script);
+            });
+        }
+
+        // 순차적으로 모듈 로드
+        async function loadModules() {
+            try {
+                console.log('🔄 모듈 로드 시작...');
+                
+                await loadScript('core/state-manager.js');
+                await new Promise(resolve => setTimeout(resolve, 200)); // 등록 대기
+                console.log('StateManager 등록 확인:', typeof window.StateManager);
+                
+                await loadScript('ui/ui-controller.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('UIController 등록 확인:', typeof window.UIController);
+                
+                await loadScript('core/error-handler.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('ErrorHandler 등록 확인:', typeof window.ErrorHandler);
+                
+                await loadScript('core/progress-manager.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('ProgressManager 등록 확인:', typeof window.ProgressManager);
+                
+                await loadScript('core/watchdog.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('PluginWatchdog 등록 확인:', typeof window.PluginWatchdog);
+                
+                // VideoProcessor 모듈 로드
+                await loadScript('processors/video-processor.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('VideoProcessor 등록 확인:', typeof window.VideoProcessor);
+                
+                // EagleIntegration 모듈 로드
+                await loadScript('integrations/eagle-integration.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('EagleIntegration 등록 확인:', typeof window.EagleIntegration);
+                
+                // FileService 모듈 로드
+                await loadScript('services/file-service.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('FileService 등록 확인:', typeof window.FileService);
+                
+                // SettingsManager 모듈 로드
+                await loadScript('utils/settings-manager.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('SettingsManager 등록 확인:', typeof window.SettingsManager);
+                
+                // FFmpegManager 모듈 로드
+                await loadScript('utils/ffmpeg-manager.js');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                console.log('FFmpegManager 등록 확인:', typeof window.FFmpegManager);
+                
+                console.log('✅ 모든 모듈 로드 완료');
+                
+                // 모듈 로드 완료 이벤트 발생
+                window.dispatchEvent(new CustomEvent('modulesLoaded'));
+                
+            } catch (error) {
+                console.error('❌ 모듈 로드 실패:', error);
+            }
+        }
+
+        // 페이지 로드 후 모듈 로드 시작
+        document.addEventListener('DOMContentLoaded', loadModules);
+    </script>
     
     <!-- 모듈 로드 완료 체크 스크립트 -->
     <script>
-        // 모듈 로드 완료 확인
-        function waitForModules() {
-            return new Promise((resolve) => {
-                const checkModules = () => {
-                    const required = ['VideoAnalyzer', 'FrameExtractor', 'ClipExtractor', 'EagleImporter'];
-                    const loaded = required.filter(module => typeof window[module] === 'function');
-                    
-                    console.log('모듈 로드 상태:', {
-                        required: required.length,
-                        loaded: loaded.length,
-                        missing: required.filter(m => typeof window[m] !== 'function')
-                    });
-                    
-                    if (loaded.length === required.length) {
-                        console.log('✅ 모든 모듈 로드 완료');
-                        resolve();
-                    } else {
-                        setTimeout(checkModules, 100); // 100ms 후 재확인
-                    }
-                };
-                checkModules();
-            });
-        }
+        // Eagle 플러그인 환경에서는 스크립트가 순차적으로 로드됨
+        console.log('📦 스크립트 로드 체크 중...');
         
-        // 모듈 로드 대기
-        waitForModules().then(() => {
-            console.log('🎯 모듈 로드 검증 완료, 메인 스크립트 로드 준비');
-        });
+        // 즉시 모듈 상태 확인
+        setTimeout(() => {
+            const required = [
+                'VideoAnalyzer', 'FrameExtractor', 'ClipExtractor', 'VideoConcatenator', 'EagleImporter',
+                'StateManager', 'UIController', 'ErrorHandler', 'ProgressManager', 'PluginWatchdog', 'VideoProcessor', 'EagleIntegration', 'FileService', 'SettingsManager', 'FFmpegManager'
+            ];
+            const loaded = required.filter(module => typeof window[module] === 'function');
+            
+            console.log('모듈 로드 상태:', {
+                required: required.length,
+                loaded: loaded.length,
+                missing: required.filter(m => typeof window[m] !== 'function')
+            });
+            
+            if (loaded.length === required.length) {
+                console.log('✅ 모든 모듈 로드 완료');
+            } else {
+                console.warn('⚠️ 일부 모듈이 로드되지 않았습니다:', required.filter(m => typeof window[m] !== 'function'));
+            }
+        }, 500); // Eagle 환경에서 500ms 후 체크
     </script>
     
-    <!-- 메인 스크립트 -->
-    <script src="main.js"></script>
+    <!-- 기존 메인 스크립트 (호환성을 위해 유지) -->
+    <!-- <script src="main.js"></script> -->
+    <!-- main.js 로드 비활성화: 새로운 모듈 구조로 완전히 독립 실행 테스트 -->
+    
+    <!-- 새로운 리팩토링된 메인 스크립트 -->
+    <script src="main-refactored.js"></script>
 </body>
 </html>

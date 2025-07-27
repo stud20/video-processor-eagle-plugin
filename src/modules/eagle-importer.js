@@ -87,6 +87,11 @@ class EagleImporter {
             
             console.log('Eagle 임포트 완료:', successCount, '/', filePaths.length, '개의 파일');
             
+            // 임포트 후 임시 파일 정리
+            if (options.cleanupAfterImport !== false) {
+                await this.cleanupTempFiles(filePaths, importResults);
+            }
+            
             return {
                 success: true,
                 totalFiles: filePaths.length,
@@ -99,6 +104,92 @@ class EagleImporter {
         } catch (error) {
             console.error('Eagle 임포트 실패:', error);
             throw new Error('Eagle 임포트에 실패했습니다: ' + error.message);
+        }
+    }
+
+    /**
+     * 임포트 후 임시 파일 정리
+     * @param {Array} filePaths - 원본 파일 경로 배열
+     * @param {Array} importResults - 임포트 결과 배열
+     * @returns {Promise<Object>} 정리 결과
+     */
+    async cleanupTempFiles(filePaths, importResults) {
+        const cleanupResults = {
+            success: true,
+            deletedFiles: 0,
+            errors: []
+        };
+
+        try {
+            const fs = this.eagleUtils?.getFS();
+            if (!fs) {
+                console.warn('파일 시스템 모듈을 사용할 수 없어 임시 파일 정리를 건너뜁니다.');
+                return cleanupResults;
+            }
+
+            console.log('🧹 임포트 성공 파일의 임시 파일 정리 시작...');
+
+            // 성공적으로 임포트된 파일들만 삭제
+            for (const result of importResults) {
+                if (result.success && result.path) {
+                    try {
+                        if (fs.existsSync(result.path)) {
+                            fs.unlinkSync(result.path);
+                            cleanupResults.deletedFiles++;
+                            console.log('✅ 임시 파일 삭제:', result.path);
+                        }
+                    } catch (error) {
+                        console.error('임시 파일 삭제 실패:', result.path, error);
+                        cleanupResults.errors.push(`${result.path}: ${error.message}`);
+                        cleanupResults.success = false;
+                    }
+                }
+            }
+
+            // 빈 디렉토리 정리 (임시 폴더가 비어있다면)
+            await this.cleanupEmptyDirectories(filePaths);
+
+            console.log(`✅ 임시 파일 정리 완료: ${cleanupResults.deletedFiles}개 파일 삭제`);
+            return cleanupResults;
+
+        } catch (error) {
+            console.error('임시 파일 정리 실패:', error);
+            cleanupResults.success = false;
+            cleanupResults.errors.push(error.message);
+            return cleanupResults;
+        }
+    }
+
+    /**
+     * 빈 디렉토리 정리
+     * @param {Array} filePaths - 파일 경로 배열
+     */
+    async cleanupEmptyDirectories(filePaths) {
+        try {
+            const fs = this.eagleUtils?.getFS();
+            const path = this.eagleUtils?.getPath();
+            
+            if (!fs || !path) return;
+
+            // 유니크한 디렉토리 경로 추출
+            const directories = [...new Set(filePaths.map(filePath => path.dirname(filePath)))];
+
+            for (const dir of directories) {
+                try {
+                    if (fs.existsSync(dir)) {
+                        const files = fs.readdirSync(dir);
+                        if (files.length === 0) {
+                            fs.rmdirSync(dir);
+                            console.log('✅ 빈 디렉토리 삭제:', dir);
+                        }
+                    }
+                } catch (error) {
+                    // 디렉토리 삭제 실패는 조용히 무시 (비어있지 않거나 근본 디렉토리일 수 있음)
+                    console.debug('디렉토리 삭제 건너뛰기:', dir, error.message);
+                }
+            }
+        } catch (error) {
+            console.error('빈 디렉토리 정리 실패:', error);
         }
     }
 
@@ -324,6 +415,8 @@ class EagleImporter {
             
             console.log('파일 임포트 완료:', fileName, '-> Eagle ID:', itemId);
             
+            // 성공적으로 임포트된 후에는 원본 파일 경로를 반환하여 나중에 정리할 수 있도록 함
+            
             return {
                 path: filePath,
                 success: true,
@@ -449,12 +542,19 @@ class EagleImporter {
      * @param {string} videoName - 비디오 이름
      * @returns {Array} 태그 배열
      */
-    generateTags(videoName) {
+    generateTags(videoName, type = 'unknown') {
         const baseTags = [
             'video-processor',
             'extracted-content',
             'cut-detection'
         ];
+        
+        // 파일 타입별 태그
+        if (type === 'frame') {
+            baseTags.push('frame-extract', 'thumbnail', 'preview');
+        } else if (type === 'clip') {
+            baseTags.push('clip-extract', 'scene-cut', 'video-segment');
+        }
         
         // 비디오 이름에서 추가 태그 생성
         const videoTags = [
@@ -470,9 +570,32 @@ class EagleImporter {
      * @param {string} videoName - 비디오 이름
      * @returns {string} 주석 내용
      */
-    generateAnnotation(videoName) {
+    generateAnnotation(videoName, type = 'unknown', metadata = {}) {
         const timestamp = new Date().toLocaleString('ko-KR');
-        return `Video Processor for Eagle로 추출됨\n원본 비디오: ${videoName}\n추출 일시: ${timestamp}`;
+        
+        let description = '';
+        if (type === 'frame') {
+            description = '자동 자른 검출로 추출된 대표 프레임';
+        } else if (type === 'clip') {
+            description = '자동 자른 검출로 추출된 장면 클립';
+        } else {
+            description = 'Video Processor로 처리된 파일';
+        }
+        
+        let annotation = `${description}\n원본 비디오: ${videoName}\n추출 일시: ${timestamp}`;
+        
+        // 추가 메타데이터
+        if (metadata.duration) {
+            annotation += `\n재생 시간: ${metadata.duration}초`;
+        }
+        if (metadata.sceneIndex !== undefined) {
+            annotation += `\n장면 순서: ${metadata.sceneIndex + 1}번째`;
+        }
+        if (metadata.timestamp) {
+            annotation += `\n비디오 시점: ${metadata.timestamp}`;
+        }
+        
+        return annotation;
     }
 
     /**

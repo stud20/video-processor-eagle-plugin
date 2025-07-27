@@ -23,27 +23,36 @@ class EagleUtils {
     }
 
     /**
-     * 로컬 캐시 디렉토리 생성 (고정 경로 사용)
+     * Eagle 라이브러리 기반 캐시 디렉토리 생성
      * @param {string} type - 캐시 타입 ('clips' 또는 'frames')
      * @returns {Promise<string>} 캐시 디렉토리 경로
      */
     async getCacheDirectory(type = 'clips') {
         try {
-            let cachePath;
+            // 1. Eagle 라이브러리 경로 기반 캐시 디렉토리 시도
+            const libraryPath = await this.getLibraryPath();
+            if (libraryPath) {
+                const cacheDir = this.joinPath(libraryPath, 'video-processor-cache', type);
+                await this.ensureDirectory(cacheDir);
+                console.log('Eagle 라이브러리 기반 캐시 디렉토리:', cacheDir);
+                return cacheDir;
+            }
             
+            // 2. 폴백: 기존 하드코딩된 경로
+            let cachePath;
             if (type === 'frames') {
                 cachePath = '/Users/ysk/assets/temp/frame';
             } else {
                 cachePath = '/Users/ysk/assets/temp/clips';
             }
             
-            // 디렉토리 생성
             await this.ensureDirectory(cachePath);
-            console.log('로컬 캐시 디렉토리:', cachePath);
+            console.log('폴백 캐시 디렉토리:', cachePath);
             return cachePath;
+            
         } catch (error) {
             console.error('캐시 디렉토리 생성 실패:', error);
-            // 최종 폴백 - 임시 디렉토리
+            // 최종 폴백 - 시스템 임시 디렉토리
             const tempPath = this.joinPath(require('os').tmpdir(), 'video-processor-cache', type);
             await this.ensureDirectory(tempPath);
             return tempPath;
@@ -51,18 +60,72 @@ class EagleUtils {
     }
 
     /**
-     * 모든 캐시 디렉토리 경로 가져오기
-     * @returns {Array<string>} 캐시 디렉토리 경로 배열
+     * 현재 Eagle 라이브러리 경로 가져오기
+     * @returns {Promise<string|null>} 현재 라이브러리 경로 또는 null
      */
-    getAllCacheDirectories() {
-        return [
-            '/Users/ysk/assets/temp/clips',
-            '/Users/ysk/assets/temp/frame'
-        ];
+    async getLibraryPath() {
+        if (!this.isEagleAvailable) {
+            console.log('Eagle API 미사용으로 null 반환');
+            return null;
+        }
+
+        try {
+            // 방법 1: Eagle Plugin API 직접 접근
+            if (this.eagle.library && this.eagle.library.path) {
+                const libraryPath = this.eagle.library.path;
+                console.log('현재 Eagle 라이브러리 경로:', libraryPath);
+                return libraryPath;
+            }
+
+            // 방법 2: HTTP API 사용
+            const response = await fetch('http://localhost:41595/api/library/info');
+            const result = await response.json();
+            
+            if (result.status === 'success' && result.data && result.data.path) {
+                console.log('HTTP API로 라이브러리 경로 확인:', result.data.path);
+                return result.data.path;
+            }
+
+            console.warn('라이브러리 경로를 찾을 수 없습니다');
+            return null;
+
+        } catch (error) {
+            console.error('라이브러리 경로 조회 실패:', error);
+            return null;
+        }
     }
 
     /**
-     * 모든 캐시 파일 삭제
+     * 모든 캐시 디렉토리 경로 가져오기 (동적)
+     * @returns {Promise<Array<string>>} 캐시 디렉토리 경로 배열
+     */
+    async getAllCacheDirectories() {
+        const directories = [];
+        
+        try {
+            // Eagle 라이브러리 기반 경로
+            const libraryPath = await this.getLibraryPath();
+            if (libraryPath) {
+                directories.push(
+                    this.joinPath(libraryPath, 'video-processor-cache', 'clips'),
+                    this.joinPath(libraryPath, 'video-processor-cache', 'frames')
+                );
+            }
+        } catch (error) {
+            console.warn('동적 캐시 디렉토리 경로 생성 실패:', error);
+        }
+        
+        // 폴백: 기존 하드코딩된 경로
+        directories.push(
+            '/Users/ysk/assets/temp/clips',
+            '/Users/ysk/assets/temp/frame'
+        );
+        
+        return directories;
+    }
+
+    /**
+     * 모든 캐시 파일 삭제 (동적 경로 지원)
      * @returns {Promise<Object>} 삭제 결과
      */
     async clearAllCache() {
@@ -72,7 +135,7 @@ class EagleUtils {
             errors: []
         };
 
-        const cacheDirectories = this.getAllCacheDirectories();
+        const cacheDirectories = await this.getAllCacheDirectories();
         const fs = this.getFS();
         
         if (!fs) {
@@ -81,6 +144,8 @@ class EagleUtils {
             return results;
         }
 
+        console.log('정리할 캐시 디렉토리:', cacheDirectories);
+        
         for (const dirPath of cacheDirectories) {
             try {
                 if (fs.existsSync(dirPath)) {
@@ -96,6 +161,8 @@ class EagleUtils {
                             console.log('삭제된 캐시 파일:', filePath);
                         }
                     }
+                } else {
+                    console.log('캐시 디렉토리가 존재하지 않음:', dirPath);
                 }
             } catch (error) {
                 console.error(`캐시 디렉토리 정리 실패: ${dirPath}`, error);
@@ -213,30 +280,81 @@ class EagleUtils {
             const selectedItems = await this.eagle.item.getSelected();
             const videoExtensions = ['mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'webm', 'm4v'];
             
-            // 비디오 파일만 필터링하고 실제 파일 경로 추가
+            console.log('Eagle에서 선택된 전체 아이템:', selectedItems.length);
+            
+            // 비디오 파일만 필터링
             const videoFiles = selectedItems.filter(item => 
                 videoExtensions.includes(item.ext.toLowerCase())
             );
             
+            console.log('필터링된 비디오 파일:', videoFiles.length);
+            
             // 각 아이템에 실제 파일 경로 추가
+            const filesWithPaths = [];
+            
             for (const item of videoFiles) {
-                // Eagle 아이템의 실제 파일 경로 가져오기
-                // filePath 또는 path 속성을 확인
-                if (!item.filePath && !item.path) {
-                    // 아이템 ID로 상세 정보 가져오기
+                console.log('처리 중인 비디오 아이템:', {
+                    id: item.id,
+                    name: item.name,
+                    ext: item.ext,
+                    filePath: item.filePath,
+                    path: item.path
+                });
+                
+                let actualPath = item.filePath || item.path;
+                
+                // 경로가 없는 경우 Eagle API로 상세 정보 가져오기
+                if (!actualPath) {
                     try {
-                        const detailedItem = await this.eagle.item.getById(item.id);
-                        if (detailedItem && detailedItem.filePath) {
-                            item.filePath = detailedItem.filePath;
-                            item.path = detailedItem.filePath;
+                        // Eagle API를 통해 파일 경로 가져오기
+                        console.log(`아이템 ${item.name}의 파일 경로를 API로 조회 중...`);
+                        
+                        // Eagle의 HTTP API 사용 (더 확실한 방법)
+                        const response = await fetch(`http://localhost:41595/api/item/info?id=${item.id}`);
+                        const apiResult = await response.json();
+                        
+                        console.log('Eagle API 응답:', apiResult);
+                        
+                        if (apiResult.status === 'success' && apiResult.data) {
+                            actualPath = apiResult.data.filePath || 
+                                        apiResult.data.path || 
+                                        apiResult.data.url ||
+                                        apiResult.data.src;
                         }
+                        
+                        // 여전히 경로가 없다면 다른 방법 시도
+                        if (!actualPath && this.eagle.item.getInfo) {
+                            const itemInfo = await this.eagle.item.getInfo(item.id);
+                            actualPath = itemInfo?.filePath || itemInfo?.path;
+                        }
+                        
                     } catch (err) {
-                        console.warn(`아이템 ${item.name}의 상세 정보를 가져올 수 없습니다:`, err);
+                        console.warn(`아이템 ${item.name}의 파일 경로를 가져올 수 없습니다:`, err);
                     }
+                }
+                
+                if (actualPath) {
+                    filesWithPaths.push({
+                        ...item,
+                        path: actualPath,
+                        filePath: actualPath
+                    });
+                    console.log(`✅ 파일 경로 확인: ${item.name} -> ${actualPath}`);
+                } else {
+                    console.warn(`❌ 파일 경로를 찾을 수 없음: ${item.name}`);
+                    // 경로가 없어도 아이템 정보는 포함 (경고와 함께)
+                    filesWithPaths.push({
+                        ...item,
+                        path: null,
+                        filePath: null,
+                        _warning: '파일 경로를 찾을 수 없음'
+                    });
                 }
             }
             
-            return videoFiles;
+            console.log('최종 처리된 비디오 파일:', filesWithPaths.length);
+            return filesWithPaths;
+            
         } catch (error) {
             console.error('선택된 비디오 파일 가져오기 실패:', error);
             return [];
@@ -332,6 +450,168 @@ class EagleUtils {
         } catch (error) {
             console.warn(`파일 통계 정보 가져오기 실패: ${filePath}`, error);
             return null;
+        }
+    }
+
+    /**
+     * FFmpeg 경로 가져오기 (시스템별 자동 감지)
+     * @returns {object} FFmpeg 바이너리 경로들
+     */
+    async getFFmpegPaths() {
+        try {
+            console.log('🔍 FFmpeg 경로 자동 감지...');
+            
+            // 1. Eagle FFmpeg 플러그인 우선 시도
+            if (this.eagle && this.eagle.extraModule && this.eagle.extraModule.ffmpeg) {
+                try {
+                    const isInstalled = await this.eagle.extraModule.ffmpeg.isInstalled();
+                    if (isInstalled) {
+                        const paths = await this.eagle.extraModule.ffmpeg.getPaths();
+                        console.log('✅ Eagle FFmpeg 플러그인에서 경로 가져옴:', paths);
+                        return paths;
+                    } else {
+                        console.log('⚠️ Eagle FFmpeg 플러그인이 설치되지 않았습니다');
+                    }
+                } catch (error) {
+                    console.warn('Eagle FFmpeg 플러그인 확인 실패:', error);
+                }
+            }
+            
+            // 2. 시스템 경로 자동 감지
+            const detectedPaths = this.detectSystemFFmpegPaths();
+            if (detectedPaths) {
+                console.log('✅ 시스템에서 FFmpeg 경로 감지됨:', detectedPaths);
+                return detectedPaths;
+            }
+            
+            // 3. 기본 경로 반환
+            const defaultPaths = this.getDefaultFFmpegPaths();
+            console.log('⚠️ 기본 FFmpeg 경로 사용:', defaultPaths);
+            return defaultPaths;
+            
+        } catch (error) {
+            console.error('FFmpeg 경로 가져오기 실패:', error);
+            return this.getDefaultFFmpegPaths();
+        }
+    }
+
+    /**
+     * 시스템에서 FFmpeg 경로 자동 감지
+     * @returns {object|null} 감지된 FFmpeg 경로들 또는 null
+     */
+    detectSystemFFmpegPaths() {
+        try {
+            const child_process = this.getNodeModule('child_process');
+            if (!child_process) {
+                console.warn('child_process 모듈을 사용할 수 없습니다');
+                return null;
+            }
+
+            // 가능한 FFmpeg 설치 경로들 (macOS 기준)
+            const possiblePaths = [
+                '/opt/homebrew/bin/ffmpeg',    // Apple Silicon Homebrew
+                '/usr/local/bin/ffmpeg',       // Intel Homebrew
+                '/usr/bin/ffmpeg',             // 시스템 설치
+                'ffmpeg'                       // PATH 환경변수
+            ];
+
+            for (const ffmpegPath of possiblePaths) {
+                try {
+                    // ffmpeg 경로 확인
+                    if (ffmpegPath !== 'ffmpeg') {
+                        const fs = this.getFS();
+                        if (!fs || !fs.existsSync(ffmpegPath)) {
+                            continue;
+                        }
+                    }
+
+                    // ffprobe 경로 추론
+                    const ffprobePath = ffmpegPath.replace('ffmpeg', 'ffprobe');
+                    
+                    // ffprobe 존재 확인
+                    if (ffprobePath !== 'ffprobe') {
+                        const fs = this.getFS();
+                        if (!fs || !fs.existsSync(ffprobePath)) {
+                            continue;
+                        }
+                    }
+
+                    console.log(`✅ FFmpeg 경로 감지: ${ffmpegPath}, ${ffprobePath}`);
+                    return {
+                        ffmpeg: ffmpegPath,
+                        ffprobe: ffprobePath
+                    };
+
+                } catch (error) {
+                    console.warn(`FFmpeg 경로 확인 실패 (${ffmpegPath}):`, error);
+                    continue;
+                }
+            }
+
+            return null;
+
+        } catch (error) {
+            console.error('시스템 FFmpeg 경로 감지 실패:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 플랫폼별 기본 FFmpeg 경로 가져오기
+     * @returns {object} 기본 FFmpeg 경로들
+     */
+    getDefaultFFmpegPaths() {
+        // macOS 기본 경로 (Homebrew 기준)
+        return {
+            ffmpeg: '/opt/homebrew/bin/ffmpeg',
+            ffprobe: '/opt/homebrew/bin/ffprobe'
+        };
+    }
+
+    /**
+     * FFmpeg 테스트 실행
+     * @param {object} paths - FFmpeg 경로들
+     * @returns {Promise<boolean>} 테스트 성공 여부
+     */
+    async testFFmpeg(paths) {
+        try {
+            const child_process = this.getNodeModule('child_process');
+            if (!child_process) {
+                console.warn('child_process 모듈을 사용할 수 없어 FFmpeg 테스트를 건너뜁니다');
+                return true; // 낙관적 결과
+            }
+
+            return new Promise((resolve) => {
+                const ffmpeg = child_process.spawn(paths.ffmpeg, ['-version'], {
+                    stdio: ['ignore', 'pipe', 'pipe']
+                });
+
+                let output = '';
+                ffmpeg.stdout.on('data', (data) => {
+                    output += data.toString();
+                });
+
+                ffmpeg.on('close', (code) => {
+                    const success = code === 0 && output.includes('ffmpeg version');
+                    console.log(`🧪 FFmpeg 테스트: ${success ? '성공' : '실패'} (코드: ${code})`);
+                    resolve(success);
+                });
+
+                ffmpeg.on('error', (error) => {
+                    console.error('FFmpeg 테스트 실행 오류:', error);
+                    resolve(false);
+                });
+
+                // 5초 타임아웃
+                setTimeout(() => {
+                    ffmpeg.kill();
+                    resolve(false);
+                }, 5000);
+            });
+
+        } catch (error) {
+            console.error('FFmpeg 테스트 실패:', error);
+            return false;
         }
     }
 }

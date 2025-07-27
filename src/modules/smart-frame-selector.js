@@ -854,13 +854,23 @@ class SmartFrameSelector {
      */
     selectRepresentativeFrames(features, clusters, config) {
         const selectedFrames = [];
+        const usedIndices = new Set(); // 중복 방지를 위한 Set
+        const usedPaths = new Set(); // 경로 중복 방지
 
         // 클러스터 크기에 따른 가중치 적용
         const sortedClusters = clusters.sort((a, b) => b.members.length - a.members.length);
 
+        console.log(`🎯 대표 프레임 선별 시작: ${clusters.length}개 클러스터에서 ${config.targetCount}개 선별`);
+
         for (const cluster of sortedClusters) {
             const representativeIndex = cluster.representative;
             const feature = features[representativeIndex];
+            
+            // 중복 확인
+            if (usedIndices.has(representativeIndex) || usedPaths.has(feature.path)) {
+                console.warn(`⚠️ 중복 프레임 제외: 인덱스 ${representativeIndex}, 경로 ${feature.path}`);
+                continue;
+            }
             
             const frameInfo = {
                 path: feature.path,
@@ -881,6 +891,10 @@ class SmartFrameSelector {
             };
 
             selectedFrames.push(frameInfo);
+            usedIndices.add(representativeIndex);
+            usedPaths.add(feature.path);
+
+            console.log(`✅ 대표 프레임 선별: 클러스터 ${cluster.id}, 인덱스 ${representativeIndex}, 품질 ${frameInfo.qualityScore.toFixed(3)}`);
 
             // 목표 개수에 도달하면 중단
             if (selectedFrames.length >= config.targetCount) {
@@ -888,9 +902,58 @@ class SmartFrameSelector {
             }
         }
 
+        // 목표 개수에 도달하지 못한 경우 추가 선별
+        if (selectedFrames.length < config.targetCount) {
+            console.log(`📊 추가 선별 필요: ${selectedFrames.length}/${config.targetCount}, 모든 클러스터 재검토`);
+            
+            // 모든 클러스터의 멤버들을 품질 점수로 정렬하여 추가 선별
+            for (const cluster of sortedClusters) {
+                if (selectedFrames.length >= config.targetCount) break;
+                
+                // 클러스터 내 모든 멤버를 품질 점수로 정렬
+                const clusterMembers = cluster.members
+                    .map(memberIndex => features[memberIndex])
+                    .filter(feature => !usedIndices.has(feature.index) && !usedPaths.has(feature.path))
+                    .map(feature => ({
+                        feature,
+                        qualityScore: this.calculateQualityScore(feature)
+                    }))
+                    .sort((a, b) => b.qualityScore - a.qualityScore);
+                
+                for (const member of clusterMembers) {
+                    if (selectedFrames.length >= config.targetCount) break;
+                    
+                    const frameInfo = {
+                        path: member.feature.path,
+                        originalIndex: member.feature.index,
+                        clusterSize: cluster.members.length,
+                        qualityScore: member.qualityScore,
+                        cluster: {
+                            id: cluster.id,
+                            size: cluster.members.length,
+                            members: cluster.members
+                        },
+                        features: {
+                            brightness: member.feature.brightness,
+                            contrast: member.feature.contrast,
+                            sharpness: member.feature.sharpness,
+                            dominantColors: member.feature.dominantColors.slice(0, 3)
+                        }
+                    };
+
+                    selectedFrames.push(frameInfo);
+                    usedIndices.add(member.feature.index);
+                    usedPaths.add(member.feature.path);
+                    
+                    console.log(`✅ 추가 선별: 클러스터 ${cluster.id}, 인덱스 ${member.feature.index}, 품질 ${member.qualityScore.toFixed(3)}`);
+                }
+            }
+        }
+
         // 품질 점수로 최종 정렬
         selectedFrames.sort((a, b) => b.qualityScore - a.qualityScore);
 
+        console.log(`🏁 최종 선별 완료: ${selectedFrames.length}개 프레임, 중복 제거됨`);
         return selectedFrames.slice(0, config.targetCount);
     }
 

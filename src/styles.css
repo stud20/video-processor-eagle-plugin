@@ -364,8 +364,14 @@ section h2 {
 /* 파일 선택 */
 .file-info {
     display: flex;
+    flex-direction: column;
     gap: 12px;
-    align-items: center;
+}
+
+.file-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .selected-file {
@@ -596,6 +602,18 @@ section h2 {
 .btn-secondary:hover {
     background-color: #718096;
     border-color: #718096;
+}
+
+.btn-outline {
+    background: transparent;
+    color: #4299e1;
+    border: 2px solid #4299e1;
+}
+
+.btn-outline:hover {
+    background: #4299e1;
+    color: white;
+    transform: translateY(-1px);
 }
 
 .btn-success {
@@ -956,7 +974,7 @@ section {
 }
 
 /* 호버 효과 개선 */
-.selected-file:hover {
+.selected-file:hover:not(.has-file) {
     border-color: #4299e1;
     background-color: #2d3748;
 }
@@ -982,7 +1000,281 @@ section {
     }
 }
 
-/* 캐시 관리 스타일 */
+/* 비디오 파일 정보 표시 스타일 */
+.video-file-info {
+    background: #1a202c;
+    border: 1px solid #4a5568;
+    border-radius: 8px;
+    padding: 16px;
+    color: #e2e8f0;
+}
+
+.video-file-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+    gap: 12px;
+}
+
+.video-file-name {
+    flex: 1;
+    min-width: 0; /* overflow를 위해 필요 */
+}
+
+.video-file-name strong {
+    font-size: 1.05em;
+    color: #4299e1;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    title: attr(title); /* 툴팁 표시 */
+}
+
+.video-file-badges {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.file-ext-badge,
+.file-size-badge {
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.75em;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.file-ext-badge {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.file-size-badge {
+    background: #2d3748;
+    color: #a0aec0;
+    border: 1px solid #4a5568;
+}
+
+/* 메타데이터 로딩 애니메이션 */
+.metadata-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    background: #2d3748;
+    border-radius: 6px;
+    color: #a0aec0;
+    font-size: 0.9em;
+}
+
+.loading-spinner {
+    animation: spin 1s linear infinite;
+    font-size: 1.2em;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* 메타데이터 그리드 */
+.metadata-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+    padding: 8px;
+    background: #2d3748;
+    border-radius: 6px;
+    border: 1px solid #4a5568;
+}
+
+.metadata-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px;
+    background: #1a202c;
+    border-radius: 4px;
+    text-align: center;
+    transition: background-color 0.2s ease;
+}
+
+.metadata-item:hover {
+    background: #2d3748;
+}
+
+.metadata-label {
+    font-size: 0.75em;
+    color: #a0aec0;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.metadata-value {
+    font-size: 0.85em;
+    color: #e2e8f0;
+    font-weight: 600;
+    word-break: break-word;
+}
+
+/* 메타데이터 에러 상태 */
+.metadata-error {
+    padding: 12px;
+    background: rgba(245, 101, 101, 0.1);
+    border: 1px solid #f56565;
+    border-radius: 6px;
+    color: #fc8181;
+    font-size: 0.9em;
+    text-align: center;
+}
+
+.video-file-info.error {
+    border-color: #f56565;
+    background: rgba(245, 101, 101, 0.05);
+}
+
+.video-file-info.error .video-file-name strong {
+    color: #fc8181;
+}
+
+.error-message {
+    color: #fc8181;
+    font-size: 0.9em;
+    margin-top: 8px;
+    text-align: center;
+}
+
+/* 실시간 감지 상태 표시 */
+.detection-status {
+    font-size: 0.75em;
+    font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 8px;
+    margin-left: 8px;
+    display: inline-block;
+    animation: pulse 2s infinite;
+}
+
+.detection-status.active {
+    background: rgba(72, 187, 120, 0.2);
+    color: #48bb78;
+    border: 1px solid #48bb78;
+}
+
+.detection-status.inactive {
+    background: rgba(160, 174, 192, 0.2);
+    color: #a0aec0;
+    border: 1px solid #4a5568;
+}
+
+.batch-mode-badge {
+    background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.7em;
+    font-weight: 600;
+}
+
+/* 선택된 파일 애니메이션 */
+.video-file-info.selected {
+    border-color: #48bb78;
+    background: rgba(72, 187, 120, 0.05);
+    animation: selectedGlow 0.5s ease-out;
+}
+
+@keyframes selectedGlow {
+    0% {
+        box-shadow: 0 0 0 0 rgba(72, 187, 120, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(72, 187, 120, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(72, 187, 120, 0);
+    }
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+/* 플레이스홀더 개선 */
+.placeholder {
+    color: #a0aec0;
+    font-style: italic;
+    padding: 20px;
+    text-align: center;
+    background: #1a202c;
+    border-radius: 6px;
+    border: 2px dashed #4a5568;
+    transition: all 0.3s ease;
+}
+
+.placeholder:hover {
+    border-color: #4299e1;
+    color: #cbd5e0;
+}
+
+/* 파일 선택 영역 개선 */
+.selected-file {
+    transition: all 0.3s ease;
+}
+
+.selected-file.has-file {
+    border-color: #48bb78;
+    background-color: rgba(72, 187, 120, 0.05);
+    border-style: solid;
+}
+
+.selected-file.has-file:hover {
+    border-color: #68d391;
+    background-color: rgba(72, 187, 120, 0.1);
+}
+
+/* 반응형 조정 */
+@media (max-width: 400px) {
+    .video-file-header {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .video-file-badges {
+        align-self: flex-start;
+    }
+    
+    .metadata-grid {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 6px;
+    }
+    
+    .metadata-item {
+        padding: 6px;
+    }
+}
+
+/* 다크 모드 최적화 */
+@media (prefers-color-scheme: dark) {
+    .video-file-info {
+        border-color: #2d3748;
+    }
+    
+    .metadata-grid {
+        background: #1a202c;
+        border-color: #2d3748;
+    }
+}
 .cache-management {
     background: #2d3748;
     border-radius: 8px;

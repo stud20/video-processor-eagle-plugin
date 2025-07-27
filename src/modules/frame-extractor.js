@@ -187,8 +187,6 @@ class FrameExtractor {
      * @param {string} videoPath - 처리할 비디오 경로
      */
     async initialize(videoPath = null) {
-        if (this.initialized) return;
-
         try {
             // 비디오 이름으로 하위 폴더 생성
             let baseDir = this.eagleUtils ? 
@@ -205,11 +203,16 @@ class FrameExtractor {
                 } else {
                     this.outputDir = `${baseDir}/${videoName}`;
                 }
+                
+                console.log('📁 프레임 출력 디렉토리 설정:', {
+                    baseDir: baseDir,
+                    videoName: videoName,
+                    outputDir: this.outputDir
+                });
             } else {
                 this.outputDir = baseDir;
             }
 
-            console.log('FrameExtractor 초기화 완료, 출력 디렉토리:', this.outputDir);
             this.initialized = true;
         } catch (error) {
             console.error('FrameExtractor 초기화 실패:', error);
@@ -229,24 +232,23 @@ class FrameExtractor {
         if (os && path) {
             return path.join(os.tmpdir(), 'video-processor-frames');
         }
-        return './temp/frames';
+        // 폴백: 시스템 임시 디렉토리
+        return path ? path.join(require('os').tmpdir(), 'video-processor-frames') : './temp/frames';
     }
 
     /**
      * 출력 디렉토리 생성 확인
      */
     async ensureOutputDirectory() {
-        if (!this.initialized) {
-            await this.initialize();
-        }
-
         if (this.eagleUtils) {
             await this.eagleUtils.ensureDirectory(this.outputDir);
+            console.log('✅ 프레임 디렉토리 생성 확인:', this.outputDir);
         } else {
             // 폴백: 직접 디렉토리 생성
             const fs = window.require ? window.require('fs') : null;
             if (fs && !fs.existsSync(this.outputDir)) {
                 fs.mkdirSync(this.outputDir, { recursive: true });
+                console.log('✅ 프레임 디렉토리 생성:', this.outputDir);
             }
         }
     }
@@ -326,40 +328,62 @@ class FrameExtractor {
                 maxConcurrency = Math.min(Math.max(2, Math.floor(cpuCount * 0.6)), 6, cutPoints.length);
             }
             
-            console.log(`🚀 Worker Pool 병렬 프레임 추출: 최대 ${maxConcurrency}개 동시 처리`);
+            // 추출 방식 결정
+            let extractionResults = [];
             
-            // 작업 목록 생성 (Worker Pool용)
-            const tasks = cutPoints.map((cutPoint, index) => ({
-                cutPoint,
-                index,
-                originalIndex: index, // 결과 순서 보장용
-                videoPath,
-                settings: config
-            }));
+            if (config.extractionMethod === 'unified' && totalFrames > 3) {
+                // 🚀 초고속 배치 방식: 1번의 FFmpeg 실행으로 모든 프레임 추출
+                console.log(`🚀 초고속 배치 추출: ${totalFrames}개 프레임을 1번의 FFmpeg 실행으로 처리`);
+                
+                extractionResults = await this.extractFramesBatch(
+                    videoPath, 
+                    cutPoints, 
+                    config, 
+                    (progress, message) => {
+                        processedCount = Math.round(progress * totalFrames);
+                        updateProgress(processedCount, message);
+                    }
+                );
+                
+            } else {
+                // ⚡ 병렬 워커 방식: 안정성 우선
+                console.log(`⚡ Worker Pool 병렬 프레임 추출: 최대 ${maxConcurrency}개 동시 처리`);
+                
+                // 작업 목록 생성 (Worker Pool용)
+                const tasks = cutPoints.map((cutPoint, index) => ({
+                    cutPoint,
+                    index,
+                    originalIndex: index, // 결과 순서 보장용
+                    videoPath,
+                    settings: config
+                }));
+                
+                // Worker Pool 생성 및 실행
+                const workerPool = new FrameExtractionPool(maxConcurrency, this);
+                
+                // 스트리밍 병렬 처리 실행
+                extractionResults = await workerPool.processAllFrames(
+                    tasks,
+                    (progress, message) => {
+                        processedCount = Math.round(progress * totalFrames);
+                        updateProgress(processedCount, message);
+                    }
+                );
+            }
             
-            // Worker Pool 생성 및 실행
-            const workerPool = new FrameExtractionPool(maxConcurrency, this);
-            
-            // 스트리밍 병렬 처리 실행
-            const extractedFrames = await workerPool.processAllFrames(
-                tasks,
-                (progress, message) => {
-                    processedCount = Math.round(progress * totalFrames);
-                    updateProgress(processedCount, message);
-                }
-            );
-            
-            console.log(`🏁 Worker Pool 완료: ${extractedFrames.length}/${totalFrames}개 프레임 추출 성공`);
+            // 결과 처리
+            const validResults = extractionResults.filter(result => result !== null);
+            console.log(`🏁 프레임 추출 완료: ${validResults.length}/${totalFrames}개 프레임 추출 성공`);
             
             updateProgress(totalFrames, 'Eagle 임포트 준비 중...');
             
-            console.log('프레임 추출 완료:', extractedFrames.length, '개의 프레임');
+            console.log('프레임 추출 완료:', validResults.length, '개의 프레임');
             
             // Eagle 임포트 (선택사항)
             let eagleImportResult = null;
             if (this.options.autoImportToEagle && this.eagleUtils?.isEagleAvailable) {
                 try {
-                    eagleImportResult = await this.importToEagle(extractedFrames, videoPath);
+                    eagleImportResult = await this.importToEagle(validResults, videoPath);
                     updateProgress(totalFrames, 'Eagle 임포트 완료!');
                 } catch (importError) {
                     console.error('Eagle 임포트 실패:', importError);
@@ -368,12 +392,12 @@ class FrameExtractor {
             }
             
             return {
-                count: extractedFrames.length,
-                frames: extractedFrames,
-                paths: extractedFrames.map(f => f.path),
+                count: validResults.length,
+                frames: validResults,
+                paths: validResults.map(f => f.path),
                 outputDir: this.outputDir,
                 eagleImport: eagleImportResult,
-                metadata: this.generateMetadata(videoPath, extractedFrames)
+                metadata: this.generateMetadata(videoPath, validResults)
             };
             
         } catch (error) {
@@ -410,19 +434,23 @@ class FrameExtractor {
                 this.eagleUtils.joinPath(this.outputDir, outputFileName) : 
                 `${this.outputDir}/${outputFileName}`;
             
-            // FFmpeg 명령어 구성
+            // FFmpeg 명령어 구성 (정확한 프레임 추출 - Accurate Seeking)
             const args = [
                 '-i', videoPath,
-                '-ss', timeSeconds.toString(),
+                '-ss', timeSeconds.toString(),  // -ss를 -i 뒤에 두어 정확한 프레임 추출
                 '-frames:v', '1',
+                '-vf', 'select=gte(n\\,0)',  // 첫 번째 프레임 선택
                 '-q:v', this.mapQualityToFFmpeg(settings.quality, settings.imageFormat),
+                '-vsync', 'vfr',  // 가변 프레임 레이트 동기화
+                '-copyts',  // 원본 타임스탬프 복사
                 '-y', // 파일 덮어쓰기
                 outputPath
             ];
 
             // GPU 가속 설정 추가 (설정에 따라)
             if (this.configManager?.get('performance.enableGPUAcceleration')) {
-                args.splice(1, 0, '-hwaccel', 'auto');
+                // -i 앞에 GPU 가속 옵션 추가
+                args.splice(0, 0, '-hwaccel', 'auto');
             }
 
             let ffmpeg;
@@ -520,6 +548,197 @@ class FrameExtractor {
                 formattedSize: frame.formattedSize || `${frame.fileSize} bytes`
             }))
         };
+    }
+
+    /**
+     * 🚀 초고속 배치 프레임 추출 (1번의 FFmpeg 실행으로 모든 프레임 추출)
+     * @param {string} videoPath - 비디오 파일 경로
+     * @param {Array} cutPoints - 컷 포인트 배열
+     * @param {Object} config - 설정 객체
+     * @param {Function} progressCallback - 진행률 콜백
+     * @returns {Promise<Array>} 추출된 프레임 배열
+     */
+    async extractFramesBatch(videoPath, cutPoints, config, progressCallback = null) {
+        try {
+            const videoName = this.eagleUtils?.getBaseName(videoPath) || 'video';
+            const extractedFrames = [];
+            
+            // 프레임 추출 시간점들 계산
+            const timePoints = cutPoints.map((cutPoint, index) => {
+                const extractTime = cutPoint.start + (cutPoint.duration / 2);
+                const outputFileName = config.analysisFrameNaming && config.totalDuration > 0 ?
+                    `${videoName}_${(index + 1).toString().padStart(3, '0')}_${(extractTime / config.totalDuration).toFixed(4)}.${config.imageFormat}` :
+                    `${videoName}_frame_${(index + 1).toString().padStart(3, '0')}.${config.imageFormat}`;
+                
+                return {
+                    time: extractTime,
+                    outputPath: this.eagleUtils ? 
+                        this.eagleUtils.joinPath(this.outputDir, outputFileName) : 
+                        `${this.outputDir}/${outputFileName}`,
+                    index: index + 1,
+                    cutPoint
+                };
+            });
+            
+            // 🚀 초고속 멀티패스 배치 추출 방식
+            // 큰 배치를 작은 청크로 나누어 병렬 처리
+            const chunkSize = 8; // 한 번에 8개씩 처리
+            const chunks = [];
+            
+            for (let i = 0; i < timePoints.length; i += chunkSize) {
+                chunks.push(timePoints.slice(i, i + chunkSize));
+            }
+            
+            console.log(`📦 ${timePoints.length}개 프레임을 ${chunks.length}개 청크로 분할하여 병렬 처리`);
+            
+            // 병렬 청크 처리
+            const chunkResults = await Promise.all(
+                chunks.map((chunk, chunkIndex) => 
+                    this.extractFramesChunk(videoPath, chunk, config, chunkIndex, progressCallback)
+                )
+            );
+            
+            // 결과 합치기
+            const allResults = chunkResults.flat().filter(result => result !== null);
+            console.log(`🏁 멀티청크 추출 완료: ${allResults.length}/${timePoints.length}개 프레임 성공`);
+            progressCallback?.(1, `멀티청크 추출 완료: ${allResults.length}개 프레임`);
+            
+            return allResults;
+        } catch (error) {
+            console.error('배치 프레임 추출 실패:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 🚀 청크 단위 프레임 추출 (더 효율적인 방식)
+     * @param {string} videoPath - 비디오 파일 경로
+     * @param {Array} chunk - 처리할 프레임 청크
+     * @param {Object} config - 설정 객체
+     * @param {number} chunkIndex - 청크 인덱스
+     * @param {Function} progressCallback - 진행률 콜백
+     * @returns {Promise<Array>} 추출된 프레임 배열
+     */
+    async extractFramesChunk(videoPath, chunk, config, chunkIndex, progressCallback) {
+        try {
+            const videoName = this.eagleUtils?.getBaseName(videoPath) || 'video';
+            const results = [];
+            let processed = 0;
+            
+            // 🎯 더 효율적인 방식: 각 프레임을 개별적으로 빠르게 추출
+            for (const point of chunk) {
+                try {
+                    const result = await this.extractSingleFrameFast(videoPath, point, config);
+                    if (result) {
+                        results.push(result);
+                    }
+                    processed++;
+                    
+                    // 청크 내 진행률 업데이트
+                    if (progressCallback) {
+                        const chunkProgress = processed / chunk.length;
+                        progressCallback(chunkProgress, `청크 ${chunkIndex + 1} 처리: ${processed}/${chunk.length}`);
+                    }
+                    
+                } catch (error) {
+                    console.error(`청크 ${chunkIndex + 1} 프레임 ${point.index} 추출 실패:`, error);
+                    processed++;
+                }
+            }
+            
+            return results;
+        } catch (error) {
+            console.error('청크 프레임 추출 실패:', error);
+            throw error;
+        }
+    }
+    
+    /**
+     * 🏃‍♂️ 단일 프레임 고속 추출 (최적화된 명령어 사용)
+     * @param {string} videoPath - 비디오 파일 경로
+     * @param {Object} point - 프레임 시간점 정보
+     * @param {Object} config - 설정 객체
+     * @returns {Promise<Object>} 추출된 프레임 정보
+     */
+    async extractSingleFrameFast(videoPath, point, config) {
+        return new Promise((resolve, reject) => {
+            const videoName = this.eagleUtils?.getBaseName(videoPath) || 'video';
+            const outputFileName = `${videoName}_frame_${point.index.toString().padStart(3, '0')}.${config.imageFormat}`;
+            const outputPath = this.eagleUtils ? 
+                this.eagleUtils.joinPath(this.outputDir, outputFileName) : 
+                `${this.outputDir}/${outputFileName}`;
+            
+            // 🚀 최적화된 FFmpeg 명령어 (가장 빠른 단일 프레임 추출)
+            const args = [
+                '-ss', point.time.toString(),      // 시간 먼저 지정 (중요!)
+                '-i', videoPath,                   // 입력 파일
+                '-frames:v', '1',                  // 1프레임만 추출
+                '-q:v', this.mapQualityToFFmpeg(config.quality, config.imageFormat),
+                '-y',                              // 덮어쓰기
+                outputPath
+            ];
+            
+            // GPU 가속 (선택사항)
+            if (this.configManager?.get('performance.enableGPUAcceleration')) {
+                args.splice(0, 0, '-hwaccel', 'auto');
+            }
+            
+            let ffmpeg;
+            try {
+                ffmpeg = this.eagleUtils ? 
+                    this.eagleUtils.spawn(this.ffmpegPaths.ffmpeg, args) :
+                    window.require('child_process').spawn(this.ffmpegPaths.ffmpeg, args);
+            } catch (error) {
+                reject(new Error(`고속 FFmpeg 프로세스 시작 실패: ${error.message}`));
+                return;
+            }
+            
+            let stderr = '';
+            
+            ffmpeg.stderr.on('data', (data) => {
+                stderr += data.toString();
+            });
+            
+            ffmpeg.on('close', (code) => {
+                if (code !== 0) {
+                    reject(new Error(`고속 프레임 추출 실패 (코드: ${code}): ${stderr}`));
+                    return;
+                }
+                
+                // 파일 존재 확인
+                if (this.eagleUtils?.fileExists(outputPath)) {
+                    const stats = this.eagleUtils.getFileStats(outputPath);
+                    resolve({
+                        filename: outputFileName,
+                        path: outputPath,
+                        timeSeconds: point.time,
+                        frameIndex: point.index,
+                        frameNumber: point.index,
+                        fileSize: stats?.size || 0,
+                        formattedSize: stats ? this.formatFileSize(stats.size) : '0 bytes',
+                        cutPoint: point.cutPoint
+                    });
+                } else {
+                    reject(new Error(`추출된 파일을 찾을 수 없음: ${outputPath}`));
+                }
+            });
+            
+            ffmpeg.on('error', (error) => {
+                reject(new Error(`고속 FFmpeg 실행 오류: ${error.message}`));
+            });
+        });
+    }
+
+    /**
+     * 파일 크기 포맷팅
+     * @param {number} bytes - 바이트 크기
+     * @returns {string} 포맷된 크기 문자열
+     */
+    formatFileSize(bytes) {
+        if (!bytes) return '0 bytes';
+        const sizes = ['bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
     }
 
     /**

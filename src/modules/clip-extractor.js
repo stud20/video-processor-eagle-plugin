@@ -166,6 +166,7 @@ class ClipExtractor {
             autoImportToEagle: true,
             createVideoFolder: true,
             cleanupAfterImport: false,
+            accurateSeek: true,  // 정확한 프레임 추출 강제
             ...options
         };
 
@@ -180,8 +181,6 @@ class ClipExtractor {
      * 초기화 (비동기)
      */
     async initialize(videoPath = null) {
-        if (this.initialized) return;
-
         try {
             // 비디오 이름으로 하위 폴더 생성
             let baseDir = this.eagleUtils ? 
@@ -198,11 +197,16 @@ class ClipExtractor {
                 } else {
                     this.outputDir = `${baseDir}/${videoName}`;
                 }
+                
+                console.log('📁 클립 출력 디렉토리 설정:', {
+                    baseDir: baseDir,
+                    videoName: videoName,
+                    outputDir: this.outputDir
+                });
             } else {
                 this.outputDir = baseDir;
             }
 
-            console.log('ClipExtractor 초기화 완료, 출력 디렉토리:', this.outputDir);
             this.initialized = true;
         } catch (error) {
             console.error('ClipExtractor 초기화 실패:', error);
@@ -221,24 +225,23 @@ class ClipExtractor {
         if (os && path) {
             return path.join(os.tmpdir(), 'video-processor-clips');
         }
-        return './temp/clips';
+        // 폴백: 시스템 임시 디렉토리
+        return path ? path.join(require('os').tmpdir(), 'video-processor-clips') : './temp/clips';
     }
 
     /**
      * 출력 디렉토리 생성 확인
      */
     async ensureOutputDirectory() {
-        if (!this.initialized) {
-            await this.initialize();
-        }
-
         if (this.eagleUtils) {
             await this.eagleUtils.ensureDirectory(this.outputDir);
+            console.log('✅ 출력 디렉토리 생성 확인:', this.outputDir);
         } else {
             // 폴백: 직접 디렉토리 생성
             const fs = window.require ? window.require('fs') : null;
             if (fs && !fs.existsSync(this.outputDir)) {
                 fs.mkdirSync(this.outputDir, { recursive: true });
+                console.log('✅ 출력 디렉토리 생성:', this.outputDir);
             }
         }
     }
@@ -269,6 +272,9 @@ class ClipExtractor {
             if (!this.ffmpegPaths) {
                 throw new Error('FFmpeg 경로가 설정되지 않았습니다.');
             }
+            
+            // 비디오 파일별 초기화 (출력 디렉토리 설정)
+            await this.initialize(videoPath);
             
             // 출력 디렉토리 확인 및 생성
             await this.ensureOutputDirectory();
@@ -364,24 +370,28 @@ class ClipExtractor {
     }
 
     /**
-     * Worker Pool용 단일 클립 추출 (최적화)
+     * Worker Pool용 단일 클립 추출 (정확한 추출)
      */
     async extractSingleClipOptimized(videoPath, cutPoint, clipIndex, settings) {
-        const maxRetries = 2;
+        const maxRetries = 3;  // 정확한 추출에서도 안정성을 위해 재시도 허용
         
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 const success = await this.attemptClipExtractionOptimized(videoPath, cutPoint, clipIndex, settings, attempt);
-                if (success) return success;
+                if (success) {
+                    console.log(`✅ 클립 ${clipIndex} 추출 성공 (Accurate Seeking)`);
+                    return success;
+                }
                 
-                // 실패 시 잠시 대기 후 재시도 (Worker Pool은 빠른 재시도)
+                // 실패 시 잠시 대기 후 재시도
                 if (attempt < maxRetries) {
-                    await new Promise(resolve => setTimeout(resolve, 25 * attempt)); // 25ms, 50ms
+                    console.warn(`클립 ${clipIndex} 추출 시도 ${attempt} 실패, ${100 * attempt}ms 후 재시도...`);
+                    await new Promise(resolve => setTimeout(resolve, 100 * attempt));
                 }
             } catch (error) {
-                console.warn(`Worker Pool 클립 ${clipIndex} 추출 시도 ${attempt}/${maxRetries} 실패:`, error.message);
+                console.warn(`클립 ${clipIndex} 추출 시도 ${attempt}/${maxRetries} 실패:`, error.message);
                 if (attempt === maxRetries) {
-                    console.error(`Worker Pool 클립 ${clipIndex} 모든 재시도 실패`);
+                    console.error(`❌ 클립 ${clipIndex} 모든 재시도 실패`);
                 }
             }
         }
@@ -393,8 +403,14 @@ class ClipExtractor {
      * Worker Pool 최적화 클립 추출 시도
      */
     async attemptClipExtractionOptimized(videoPath, cutPoint, clipIndex, settings, attempt) {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             try {
+                if (!this.eagleUtils) {
+                    console.error(`ClipExtractor: EagleUtils가 없습니다`);
+                    resolve(null);
+                    return;
+                }
+                
                 const videoName = this.eagleUtils.getBaseName(videoPath);
                 const outputFileName = `${videoName}_clip_${clipIndex.toString().padStart(3, '0')}.mp4`;
                 const outputPath = this.eagleUtils.joinPath(this.outputDir, outputFileName);
@@ -412,40 +428,37 @@ class ClipExtractor {
                     adjustedCutPoint.end = adjustedCutPoint.start + 30;
                 }
                 
-                // M4 MAX 최적화: 첫 번째 시도는 재인코딩, 두 번째는 스트림 복사
-                let ffmpegArgs;
-                
-                if (attempt === 1) {
-                    // Worker Pool 최적화: 하드웨어 가속 활용 재인코딩
-                    ffmpegArgs = [
-                        '-i', videoPath,
-                        '-ss', adjustedCutPoint.start.toFixed(3),
-                        '-t', adjustedCutPoint.duration.toFixed(3),
-                        '-c:v', 'libx264',
-                        '-c:a', 'aac',
-                        '-crf', this.mapQualityToCRF(settings.quality || 6),
-                        '-preset', 'veryfast', // Worker Pool에서 빠른 처리
-                        '-pix_fmt', 'yuv420p',
-                        '-avoid_negative_ts', 'make_zero',
-                        '-movflags', '+faststart',
-                        '-threads', '0', // 모든 사용 가능한 코어 활용
-                        '-y',
-                        outputPath
-                    ];
-                } else {
-                    // 폴백: 스트림 복사 (고속)
-                    ffmpegArgs = [
-                        '-ss', adjustedCutPoint.start.toFixed(3),
-                        '-i', videoPath,
-                        '-t', adjustedCutPoint.duration.toFixed(3),
-                        '-c', 'copy',
-                        '-avoid_negative_ts', 'make_zero',
-                        '-fflags', '+genpts',
-                        '-reset_timestamps', '1',
-                        '-y',
-                        outputPath
-                    ];
-                }
+                // 블랙프레임 방지를 위한 정확한 프레임 추출
+                // -ss를 반드시 -i 뒤에 배치하여 정확한 프레임 추출
+                const ffmpegArgs = [
+                    '-i', videoPath,
+                    '-ss', adjustedCutPoint.start.toFixed(3),
+                    '-t', adjustedCutPoint.duration.toFixed(3),
+                    '-c:v', 'libx264',
+                    '-c:a', 'copy',  // 오디오 스트림 복사 (속도 향상)
+                    '-crf', '18',  // 고정 고품질 설정
+                    '-preset', 'medium',
+                    '-pix_fmt', 'yuv420p',
+                    '-bf', '0',  // B-frame 비활성화 (블랙프레임 방지)
+                    '-g', '25',  // GOP 고정 (FPS 기반)
+                    '-sc_threshold', '0',  // 씨즘 변경 비활성화
+                    '-movflags', '+faststart',
+                    '-fflags', '+genpts',  // 타임스탬프 재생성 (필수)
+                    '-threads', '1',
+                    '-y',
+                    outputPath
+                ];
+
+                // 진단용 로깅
+                console.log(`🔧 클립 ${clipIndex} 추출 (No Black Frame):`, {
+                    start: adjustedCutPoint.start.toFixed(3),
+                    duration: adjustedCutPoint.duration.toFixed(3),
+                    originalDuration: cutPoint.duration.toFixed(3),
+                    method: 'black-frame-prevention',
+                    bframes: 'disabled',
+                    gop: 'fixed-25',
+                    args: ffmpegArgs.join(' ')
+                });
 
                 const ffmpeg = this.eagleUtils ? 
                     this.eagleUtils.spawn(this.ffmpegPaths.ffmpeg, ffmpegArgs) :
@@ -463,28 +476,75 @@ class ClipExtractor {
                     hasCompleted = true;
                     clearTimeout(timeoutHandle);
                     
-                    if (code === 0 && this.eagleUtils.fileExists(outputPath)) {
-                        const stats = this.eagleUtils.getFileStats(outputPath);
-                        if (stats && stats.size > 0) {
-                            const method = attempt === 1 ? 'worker-pool-optimized' : 'stream-copy';
+                    try {
+                        if (code === 0) {
+                            // 안전한 파일 존재 확인
+                            let fileExists = false;
+                            let stats = null;
                             
-                            resolve({
-                                path: outputPath,
-                                filename: outputFileName,
-                                startTime: cutPoint.start,
-                                endTime: cutPoint.end,
-                                duration: cutPoint.duration,
-                                clipIndex: clipIndex,
-                                fileSize: stats.size,
-                                quality: settings.quality,
-                                method: method
-                            });
+                            try {
+                                fileExists = this.eagleUtils.fileExists(outputPath);
+                                if (fileExists) {
+                                    stats = this.eagleUtils.getFileStats(outputPath);
+                                }
+                            } catch (fileError) {
+                                console.warn(`클립 ${clipIndex} 파일 확인 중 오류:`, fileError.message);
+                                resolve(null);
+                                return;
+                            }
+                            
+                            if (fileExists && stats && stats.size > 0) {
+                                const method = 'accurate-seek';
+                                const fileSizeKB = (stats.size / 1024).toFixed(1);
+                                const sizePerSecond = (stats.size / 1024 / cutPoint.duration).toFixed(1);
+                                
+                                // 파일 크기 분석 (재인코딩은 일정한 크기 예상)
+                                const isLargeFile = stats.size > 10 * 1024 * 1024; // 10MB 이상
+                                const isUnusualSize = sizePerSecond > 3000; // 3MB/초 이상 (재인코딩 기준)
+                                
+                                if (isLargeFile || isUnusualSize) {
+                                    console.warn(`🚨 클립 ${clipIndex} 비정상적 크기 감지:`, {
+                                        fileSize: `${fileSizeKB}KB`,
+                                        sizePerSecond: `${sizePerSecond}KB/s`,
+                                        duration: `${cutPoint.duration.toFixed(3)}s`,
+                                        method: method,
+                                        start: cutPoint.start.toFixed(3),
+                                        end: cutPoint.end.toFixed(3)
+                                    });
+                                } else {
+                                    console.log(`✅ 클립 ${clipIndex} 정상 크기:`, {
+                                        fileSize: `${fileSizeKB}KB`,
+                                        sizePerSecond: `${sizePerSecond}KB/s`,
+                                        method: method
+                                    });
+                                }
+                                
+                                resolve({
+                                    path: outputPath,
+                                    filename: outputFileName,
+                                    startTime: cutPoint.start,
+                                    endTime: cutPoint.end,
+                                    duration: cutPoint.duration,
+                                    clipIndex: clipIndex,
+                                    fileSize: stats.size,
+                                    quality: settings.quality,
+                                    method: method,
+                                    sizePerSecond: sizePerSecond
+                                });
+                            } else {
+                                console.warn(`클립 ${clipIndex} 출력 파일 없음 또는 크기 0: ${outputPath}`);
+                                resolve(null);
+                            }
                         } else {
+                            const method = attempt === 1 ? 'reencode-fast' : 'reencode-stable';
+                            console.warn(`❌ 클립 ${clipIndex} 실패: 코드=${code} (${method})`);
+                            if (stderr) {
+                                console.warn(`FFmpeg stderr:`, stderr.substring(0, 200));
+                            }
                             resolve(null);
                         }
-                    } else {
-                        const method = attempt === 1 ? 'worker-pool-optimized' : 'stream-copy';
-                        console.warn(`❌ Worker Pool 클립 ${clipIndex} 실패: 코드=${code} (${method})`);
+                    } catch (error) {
+                        console.error(`클립 ${clipIndex} close 핸들러 오류:`, error.message);
                         resolve(null);
                     }
                 });
@@ -497,8 +557,8 @@ class ClipExtractor {
                     resolve(null);
                 });
                 
-                // Worker Pool 최적화: 더 짧은 타임아웃 (빠른 처리 기대)
-                const timeoutDuration = cutPoint.duration > 10 ? 60000 : 30000; // 30초/60초
+                // 타임아웃 시간 증가: 스트림 복사 실패 시 재인코딩 시간 고려
+                const timeoutDuration = cutPoint.duration > 10 ? 120000 : 60000; // 60초/120초
                 const timeoutHandle = setTimeout(() => {
                     if (!hasCompleted) {
                         hasCompleted = true;
@@ -509,6 +569,8 @@ class ClipExtractor {
                 }, timeoutDuration);
                 
             } catch (error) {
+                console.error(`클립 ${clipIndex} Promise 생성자 오류:`, error.message);
+                console.error(`상세 정보: videoPath=${videoPath}, outputDir=${this.outputDir}, ffmpegPaths=${JSON.stringify(this.ffmpegPaths)}`);
                 resolve(null);
             }
         });

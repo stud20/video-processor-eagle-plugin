@@ -4,288 +4,21 @@
 
 /**
  * 워치독 시스템 - 무응답 상태 감지 및 자동 초기화
+ * 
+ * NOTE: 이 클래스는 core/watchdog.js로 이동되었습니다.
+ * 리팩토링된 시스템을 사용하세요.
  */
-class PluginWatchdog {
-    constructor() {
-        this.lastActivity = Date.now();
-        this.watchdogInterval = null;
-        this.isEnabled = true;
-        this.timeoutDuration = 3 * 60 * 1000; // 3분 (밀리초)
-        this.checkInterval = 30 * 1000; // 30초마다 체크
-        this.warningShown = false;
-        
-        // 활동 감지 대상 이벤트들
-        this.activityEvents = [
-            'click', 'keydown', 'mousemove', 'scroll',
-            'touchstart', 'focus', 'input', 'change'
-        ];
-        
-        this.init();
-    }
-    
-    /**
-     * 워치독 초기화
-     */
-    init() {
-        // 활동 감지 이벤트 리스너 등록
-        this.activityEvents.forEach(eventType => {
-            document.addEventListener(eventType, () => this.recordActivity(), {
-                passive: true,
-                capture: true
-            });
-        });
-        
-        // 워치독 타이머 시작
-        this.start();
-        
-        console.log('🐕 워치독 시스템 초기화 완료 (3분 무응답 시 자동 초기화)');
-    }
-    
-    /**
-     * 활동 기록
-     */
-    recordActivity() {
-        this.lastActivity = Date.now();
-        this.warningShown = false; // 경고 상태 리셋
-        
-        // 처리 중이 아닐 때만 활동으로 인정
-        if (!AppState.isProcessing) {
-            console.log('🐕 사용자 활동 감지:', new Date().toLocaleTimeString());
-        }
-    }
-    
-    /**
-     * 워치독 시작
-     */
-    start() {
-        if (this.watchdogInterval) {
-            this.stop();
-        }
-        
-        this.watchdogInterval = setInterval(() => {
-            this.checkForInactivity();
-        }, this.checkInterval);
-        
-        console.log('🐕 워치독 타이머 시작');
-    }
-    
-    /**
-     * 워치독 정지
-     */
-    stop() {
-        if (this.watchdogInterval) {
-            clearInterval(this.watchdogInterval);
-            this.watchdogInterval = null;
-            console.log('🐕 워치독 타이머 정지');
-        }
-    }
-    
-    /**
-     * 비활성 상태 체크
-     */
-    checkForInactivity() {
-        if (!this.isEnabled) return;
-        
-        const now = Date.now();
-        const timeSinceLastActivity = now - this.lastActivity;
-        const remainingTime = this.timeoutDuration - timeSinceLastActivity;
-        
-        // 2분 30초 경과 시 경고 (30초 전)
-        if (remainingTime <= 30000 && remainingTime > 0 && !this.warningShown && !AppState.isProcessing) {
-            this.showInactivityWarning(Math.ceil(remainingTime / 1000));
-            this.warningShown = true;
-        }
-        
-        // 3분 경과 시 자동 초기화
-        if (timeSinceLastActivity >= this.timeoutDuration) {
-            console.warn('🐕 무응답 감지! 플러그인 자동 초기화 실행...');
-            this.performAutoReset();
-        }
-    }
-    
-    /**
-     * 비활성 경고 표시
-     */
-    showInactivityWarning(remainingSeconds) {
-        console.warn(`⚠️ 무응답 경고: ${remainingSeconds}초 후 자동 초기화`);
-        
-        // Eagle 알림으로 경고 표시
-        if (AppState.isEagleReady && typeof eagle.notification !== 'undefined') {
-            eagle.notification.show({
-                title: 'Video Processor 워치독',
-                body: `${remainingSeconds}초 후 무응답으로 인한 자동 초기화가 실행됩니다.`,
-                type: 'warning'
-            });
-        }
-        
-        // 콘솔에도 명확히 표시
-        console.log(`🐕 워치독 경고: 마지막 활동으로부터 ${Math.floor((Date.now() - this.lastActivity) / 1000)}초 경과`);
-    }
-    
-    /**
-     * 자동 초기화 수행
-     */
-    async performAutoReset() {
-        try {
-            console.log('🔄 플러그인 자동 초기화 시작...');
-            
-            // 1. 현재 처리 중인 작업 중단
-            if (AppState.isProcessing) {
-                console.log('🛑 진행 중인 작업 중단...');
-                AppState.isProcessing = false;
-                AppState.batchCancelled = true;
-            }
-            
-            // 2. UI 상태 초기화
-            this.resetUIState();
-            
-            // 3. 앱 상태 초기화
-            this.resetAppState();
-            
-            // 4. 모듈 재초기화
-            await this.reinitializeModules();
-            
-            // 5. Eagle API 재연결
-            this.reconnectEagleAPI();
-            
-            // 6. 활동 기록 리셋
-            this.recordActivity();
-            
-            console.log('✅ 플러그인 자동 초기화 완료');
-            
-            // 사용자에게 초기화 완료 알림
-            showNotification('무응답으로 인해 플러그인이 자동 초기화되었습니다.', 'info');
-            
-        } catch (error) {
-            console.error('❌ 자동 초기화 실패:', error);
-            
-            // 초기화 실패 시 페이지 새로고침 제안
-            if (confirm('플러그인 자동 초기화에 실패했습니다. 페이지를 새로고침하시겠습니까?')) {
-                window.location.reload();
-            }
-        }
-    }
-    
-    /**
-     * UI 상태 초기화
-     */
-    resetUIState() {
-        const { elements } = AppState;
-        
-        // 진행률 숨기기
-        if (elements.progressSection) {
-            elements.progressSection.style.display = 'none';
-        }
-        
-        // 배치 진행 숨기기
-        if (elements.batchProgress) {
-            elements.batchProgress.style.display = 'none';
-        }
-        
-        // 진행률 리셋
-        if (elements.progressFill) {
-            elements.progressFill.style.width = '0%';
-        }
-        
-        if (elements.batchProgressFill) {
-            elements.batchProgressFill.style.width = '0%';
-        }
-        
-        // 텍스트 리셋
-        if (elements.progressText) {
-            elements.progressText.textContent = '';
-        }
-        
-        console.log('🎨 UI 상태 초기화 완료');
-    }
-    
-    /**
-     * 앱 상태 초기화
-     */
-    resetAppState() {
-        // 처리 상태 리셋
-        AppState.isProcessing = false;
-        AppState.batchCancelled = false;
-        
-        // 파일 선택 상태는 유지하되, 처리 관련 상태만 리셋
-        // AppState.selectedFiles와 AppState.currentVideoFile은 유지
-        
-        console.log('📊 앱 상태 초기화 완료');
-    }
-    
-    /**
-     * 모듈 재초기화
-     */
-    async reinitializeModules() {
-        try {
-            // 모듈 로드 상태 다시 확인
-            checkModulesLoaded();
-            
-            // Eagle 유틸리티 재초기화
-            if (window.eagleUtils && typeof window.eagleUtils.initialize === 'function') {
-                await window.eagleUtils.initialize();
-            }
-            
-            console.log('🔧 모듈 재초기화 완료');
-        } catch (error) {
-            console.error('모듈 재초기화 실패:', error);
-        }
-    }
-    
-    /**
-     * Eagle API 재연결
-     */
-    reconnectEagleAPI() {
-        try {
-            // Eagle API 상태 재확인
-            checkEagleAPI();
-            
-            // 선택된 파일 자동 감지 재시도
-            if (AppState.isEagleReady) {
-                setTimeout(autoDetectSelectedFile, 1000);
-            }
-            
-            console.log('🦅 Eagle API 재연결 완료');
-        } catch (error) {
-            console.error('Eagle API 재연결 실패:', error);
-        }
-    }
-    
-    /**
-     * 워치독 활성화/비활성화
-     */
-    setEnabled(enabled) {
-        this.isEnabled = enabled;
-        console.log(`🐕 워치독 ${enabled ? '활성화' : '비활성화'}`);
-    }
-    
-    /**
-     * 타임아웃 시간 설정 (분 단위)
-     */
-    setTimeoutMinutes(minutes) {
-        this.timeoutDuration = minutes * 60 * 1000;
-        console.log(`🐕 워치독 타임아웃 설정: ${minutes}분`);
-    }
-    
-    /**
-     * 현재 상태 조회
-     */
-    getStatus() {
-        const timeSinceLastActivity = Date.now() - this.lastActivity;
-        const remainingTime = Math.max(0, this.timeoutDuration - timeSinceLastActivity);
-        
-        return {
-            isEnabled: this.isEnabled,
-            timeoutMinutes: this.timeoutDuration / (60 * 1000),
-            timeSinceLastActivitySeconds: Math.floor(timeSinceLastActivity / 1000),
-            remainingTimeSeconds: Math.floor(remainingTime / 1000),
-            lastActivity: new Date(this.lastActivity).toLocaleString()
-        };
-    }
-}
 
-// 전역 워치독 인스턴스
+// DEPRECATED - 리팩토링된 모듈 사용 (core/watchdog.js)
+// 전체 워치독 클래스가 core/watchdog.js로 이동됨
+
+// 전역 워치독 인스턴스 (Legacy)
 let pluginWatchdog = null;
+
+// 전체 PluginWatchdog 클래스 정의를 제거했습니다.
+// 새로운 모듈 시스템을 사용하세요: core/watchdog.js
+
+// 기존 코드 호환성을 위해 pluginWatchdog 변수만 유지합니다.
 
 // ===========================
 // 스마트 프레임 선별 기능
@@ -458,6 +191,14 @@ const AppState = {
     isProcessing: false,
     batchCancelled: false,
     
+    // 실시간 선택 감지 상태
+    realtimeDetection: {
+        enabled: false,
+        pollingInterval: null,
+        lastSelectionIds: [],
+        checkInterval: 1000 // 1초
+    },
+    
     // UI 요소 참조
     elements: {}
 };
@@ -479,14 +220,14 @@ function initializeElements() {
         batchList: document.getElementById('batchList'),
         
         // 설정 컨트롤
-        sensitivity: document.getElementById('sensitivity'),
+        sensitivitySlider: document.getElementById('sensitivitySlider'),
         sensitivityValue: document.getElementById('sensitivityValue'),
-        imageFormat: document.getElementById('imageFormat'),
-        quality: document.getElementById('quality'),
+        formatSelect: document.getElementById('formatSelect'),
+        qualitySlider: document.getElementById('qualitySlider'),
         qualityValue: document.getElementById('qualityValue'),
-        inHandle: document.getElementById('inHandle'),
+        inHandleSlider: document.getElementById('inHandleSlider'),
         inHandleValue: document.getElementById('inHandleValue'),
-        outHandle: document.getElementById('outHandle'),
+        outHandleSlider: document.getElementById('outHandleSlider'),
         outHandleValue: document.getElementById('outHandleValue'),
         extractionMethod: document.getElementById('extractionMethod'),
         duplicateHandling: document.getElementById('duplicateHandling'),
@@ -501,7 +242,7 @@ function initializeElements() {
         // 실행 버튼
         extractFramesBtn: document.getElementById('extractFramesBtn'),
         extractClipsBtn: document.getElementById('extractClipsBtn'),
-        processAllBtn: document.getElementById('processAllBtn'),
+        processBtn: document.getElementById('processBtn'),
         
         // 진행 상황
         progressSection: document.getElementById('progressSection'),
@@ -543,13 +284,13 @@ function setupEventListeners() {
     // 처리 버튼
     elements.extractFramesBtn?.addEventListener('click', () => processVideo('frames'));
     elements.extractClipsBtn?.addEventListener('click', () => processVideo('clips'));
-    elements.processAllBtn?.addEventListener('click', () => processVideo('all'));
+    elements.processBtn?.addEventListener('click', () => processVideo('all'));
     
     // 설정 슬라이더
-    elements.sensitivity?.addEventListener('input', updateSensitivityValue);
-    elements.quality?.addEventListener('input', updateQualityValue);
-    elements.inHandle?.addEventListener('input', updateInHandleValue);
-    elements.outHandle?.addEventListener('input', updateOutHandleValue);
+    elements.sensitivitySlider?.addEventListener('input', updateSensitivityValue);
+    elements.qualitySlider?.addEventListener('input', updateQualityValue);
+    elements.inHandleSlider?.addEventListener('input', updateInHandleValue);
+    elements.outHandleSlider?.addEventListener('input', updateOutHandleValue);
     elements.targetFrameCount?.addEventListener('input', updateTargetFrameCountValue);
     
     // 스마트 선별 체크박스
@@ -572,12 +313,14 @@ function setupEventListeners() {
  * Eagle API 확인 및 초기화
  */
 function checkEagleAPI() {
+    // 원본 함수를 다른 이름으로도 저장 (refactored 버전과의 호환을 위해)
+    window.checkEagleAPI_Original = checkEagleAPI;
     if (typeof eagle !== 'undefined') {
         AppState.isEagleReady = true;
         console.log('✅ Eagle API 사용 가능:', eagle.app?.version || 'unknown');
         
-        // 자동 파일 감지 설정
-        setTimeout(autoDetectSelectedFile, 500);
+        // 실시간 선택 감지 시작
+        startRealtimeDetection();
     } else {
         console.warn('⚠️ Eagle API를 사용할 수 없습니다.');
     }
@@ -587,69 +330,137 @@ function checkEagleAPI() {
  * Eagle에서 선택된 파일 자동 감지
  */
 async function autoDetectSelectedFile() {
-    if (!AppState.isEagleReady || !window.eagleUtils) return;
+    if (!AppState.isEagleReady || !window.eagleUtils) {
+        console.log('자동 감지 스킨: Eagle API 또는 eagleUtils를 사용할 수 없음');
+        return;
+    }
     
     try {
+        console.log('🔍 실시간 비디오 선택 감지 시도...');
+        
+        // Eagle에서 선택된 비디오 파일들 가져오기
         const videoFiles = await window.eagleUtils.getSelectedVideoFiles();
         
+        console.log(`📹 Eagle에서 감지된 비디오 파일: ${videoFiles.length}개`);
+        
         if (videoFiles.length > 0) {
-            // Eagle 아이템의 실제 파일 경로 가져오기
-            const filesWithPaths = [];
-            for (const item of videoFiles) {
-                console.log('처리 중인 아이템:', item); // 디버깅용
-                
-                // 먼저 아이템 자체에 경로가 있는지 확인
-                let filePath = item.filePath || item.path || item.url;
-                
-                // 경로가 없으면 API로 상세 정보 가져오기
-                if (!filePath) {
-                    try {
-                        const response = await fetch(`http://localhost:41595/api/item/info?id=${item.id}`);
-                        const detailInfo = await response.json();
-                        console.log('API 응답:', detailInfo); // 디버깅용
-                        
-                        if (detailInfo.status === 'success' && detailInfo.data) {
-                            // 가능한 모든 경로 속성 확인
-                            filePath = detailInfo.data.filePath || 
-                                      detailInfo.data.path || 
-                                      detailInfo.data.url ||
-                                      detailInfo.data.src;
-                            console.log('API에서 찾은 경로:', filePath); // 디버깅용
-                        }
-                    } catch (err) {
-                        console.error(`아이템 ${item.name}의 상세 정보 가져오기 실패:`, err);
-                    }
-                }
-                
-                if (filePath) {
-                    filesWithPaths.push({
-                        ...item,
-                        path: filePath,
-                        filePath: filePath,
-                        name: item.name,
-                        ext: item.ext
-                    });
-                    console.log(`✅ 파일 경로 확인: ${item.name} -> ${filePath}`);
-                } else {
-                    console.warn(`❌ 파일 경로를 찾을 수 없음: ${item.name}`);
-                }
+            // 파일 경로가 있는 파일들만 필터링
+            const validFiles = videoFiles.filter(file => file.path || file.filePath);
+            const invalidFiles = videoFiles.filter(file => !file.path && !file.filePath);
+            
+            if (invalidFiles.length > 0) {
+                console.warn(`⚠️ 파일 경로가 없는 파일 ${invalidFiles.length}개:`, 
+                    invalidFiles.map(f => f.name));
             }
             
-            if (filesWithPaths.length > 0) {
-                AppState.selectedFiles = filesWithPaths;
-                AppState.currentVideoFile = filesWithPaths[0];
-                AppState.isBatchMode = filesWithPaths.length > 1;
+            if (validFiles.length > 0) {
+                // 선택 변화 감지 및 업데이트
+                const currentIds = validFiles.map(f => f.id).sort().join(',');
+                const previousIds = AppState.realtimeDetection.lastSelectionIds.join(',');
                 
-                updateUI();
-                console.log(`🎬 자동 감지: ${filesWithPaths.length}개 동영상 파일`);
+                if (currentIds !== previousIds) {
+                    console.log(`🔄 선택 변화 감지: ${AppState.selectedFiles.length} → ${validFiles.length}개`);
+                    
+                    // 시각적 피드백을 위한 애니메이션 효과
+                    const selectedFileElement = AppState.elements.selectedFile;
+                    if (selectedFileElement) {
+                        selectedFileElement.style.transition = 'all 0.2s ease';
+                        selectedFileElement.style.transform = 'scale(0.98)';
+                        selectedFileElement.style.opacity = '0.7';
+                        
+                        setTimeout(() => {
+                            selectedFileElement.style.transform = 'scale(1)';
+                            selectedFileElement.style.opacity = '1';
+                        }, 200);
+                    }
+                    
+                    AppState.selectedFiles = validFiles;
+                    AppState.currentVideoFile = validFiles[0];
+                    AppState.isBatchMode = validFiles.length > 1;
+                    AppState.realtimeDetection.lastSelectionIds = validFiles.map(f => f.id);
+                    
+                    updateUI();
+                    
+                    // 선택 유형에 따른 알림
+                    if (validFiles.length === 1) {
+                        showNotification(`✅ 실시간 감지: ${validFiles[0].name}`, 'success');
+                        console.log(`🎬 단일 비디오 감지: ${validFiles[0].name}`);
+                    } else {
+                        showNotification(`📚 다중 선택 감지: ${validFiles.length}개 비디오 (배치 모드)`, 'info');
+                        console.log(`📚 다중 비디오 감지: ${validFiles.length}개 파일`);
+                    }
+                    
+                    // 경로 없는 파일 경고
+                    if (invalidFiles.length > 0) {
+                        console.warn(`⚠️ 주의: ${invalidFiles.length}개 파일의 경로를 찾을 수 없어 제외되었습니다.`);
+                        showNotification(`⚠️ ${invalidFiles.length}개 파일의 경로를 찾을 수 없어 제외되었습니다`, 'warning');
+                    }
+                } else {
+                    // 선택이 변하지 않음
+                    console.log('🔄 선택 변화 없음 (동일한 선택 상태)');
+                }
             } else {
-                console.warn('선택된 파일의 경로를 찾을 수 없습니다.');
+                // 유효한 파일이 없음 (전부 경로 없음)
+                console.warn('⚠️ 선택된 비디오 파일들의 경로를 모두 찾을 수 없음');
+                if (AppState.selectedFiles.length > 0) {
+                    showNotification('⚠️ 선택된 파일들의 경로를 찾을 수 없습니다', 'warning');
+                    // 상태 리셋
+                    AppState.selectedFiles = [];
+                    AppState.currentVideoFile = null;
+                    AppState.isBatchMode = false;
+                    AppState.realtimeDetection.lastSelectionIds = [];
+                    updateUI();
+                }
+            }
+        } else {
+            // 선택된 비디오 파일이 없음
+            if (AppState.selectedFiles.length > 0) {
+                console.log('🗑️ 비디오 선택 해제 감지');
+                
+                // 선택 해제 시각적 피드백
+                const selectedFileElement = AppState.elements.selectedFile;
+                if (selectedFileElement) {
+                    selectedFileElement.style.transition = 'all 0.3s ease';
+                    selectedFileElement.style.opacity = '0.6';
+                    
+                    setTimeout(() => {
+                        AppState.selectedFiles = [];
+                        AppState.currentVideoFile = null;
+                        AppState.isBatchMode = false;
+                        AppState.realtimeDetection.lastSelectionIds = [];
+                        updateUI();
+                        
+                        selectedFileElement.style.opacity = '1';
+                        selectedFileElement.style.transition = '';
+                    }, 200);
+                } else {
+                    AppState.selectedFiles = [];
+                    AppState.currentVideoFile = null;
+                    AppState.isBatchMode = false;
+                    AppState.realtimeDetection.lastSelectionIds = [];
+                    updateUI();
+                }
+            } else {
+                // 이미 비어있는 상태 - 업데이트 기록 없이 진행
+                console.log('🔄 선택 없음 (이미 비어있는 상태)');
             }
         }
+        
     } catch (error) {
-        console.error('자동 파일 감지 실패:', error);
+        console.error('❌ 자동 파일 감지 실패:', error);
+        
+        // 에러 발생 시 상태 리셋을 하지 않고 기존 선택 유지
+        // 대신 에러 로그만 출력하고 다음 감지 대기
+        if (error.message.includes('fetch')) {
+            console.warn('🔌 Eagle API 연결 문제로 보임. 다음 감지에서 재시도합니다.');
+        } else {
+            console.warn('🔌 일시적 감지 오류. 다음 감지에서 재시도합니다.');
+        }
     }
 }
+
+// 원본 함수를 다른 이름으로도 저장 (refactored 버전과의 호환을 위해)
+window.autoDetectSelectedFile_Original = autoDetectSelectedFile;
 
 /**
  * 컨텍스트 메뉴 통합 설정
@@ -659,6 +470,91 @@ function setupContextMenuIntegration() {
     
     // context-menu.js에서 처리
     console.log('컨텍스트 메뉴 통합 활성화');
+}
+
+// ===========================
+// 실시간 선택 감지 기능
+// ===========================
+
+/**
+ * 실시간 선택 감지 시작
+ */
+function startRealtimeDetection() {
+    if (AppState.realtimeDetection.enabled) {
+        console.log('🔄 실시간 감지가 이미 활성화되어 있습니다.');
+        return;
+    }
+    
+    console.log('📸 실시간 비디오 선택 감지 시작...');
+    
+    // UI 업데이트로 상태 표시
+    updateUI();
+    
+    // 초기 감지 수행
+    autoDetectSelectedFile();
+    
+    // 1초마다 폴링
+    AppState.realtimeDetection.pollingInterval = setInterval(() => {
+        if (AppState.isEagleReady && !AppState.isProcessing) {
+            autoDetectSelectedFile();
+        }
+    }, AppState.realtimeDetection.checkInterval);
+    
+    AppState.realtimeDetection.enabled = true;
+    console.log('✅ 실시간 선택 감지 활성화됨 (1초 간격)');
+    
+    // 사용자에게 활성화 알림
+    showNotification('🔴 실시간 비디오 감지가 시작되었습니다!', 'success');
+}
+
+// 원본 함수를 다른 이름으로도 저장 (refactored 버전과의 호환을 위해)
+window.startRealtimeDetection_Original = startRealtimeDetection;
+
+/**
+ * 실시간 선택 감지 중지
+ */
+function stopRealtimeDetection() {
+    if (!AppState.realtimeDetection.enabled) {
+        return;
+    }
+    
+    if (AppState.realtimeDetection.pollingInterval) {
+        clearInterval(AppState.realtimeDetection.pollingInterval);
+        AppState.realtimeDetection.pollingInterval = null;
+    }
+    
+    AppState.realtimeDetection.enabled = false;
+    console.log('⏹️ 실시간 선택 감지 중지됨');
+}
+
+// 원본 함수를 다른 이름으로도 저장 (refactored 버전과의 호환을 위해)
+window.stopRealtimeDetection_Original = stopRealtimeDetection;
+
+/**
+ * 실시간 감지 설정 업데이트
+ * @param {Object} options - 옵션 객체
+ * @param {number} options.interval - 감지 간격 (밀리초)
+ * @param {boolean} options.enabled - 활성화 여부
+ */
+function updateRealtimeDetectionSettings(options = {}) {
+    if (options.interval && options.interval >= 500) {
+        AppState.realtimeDetection.checkInterval = options.interval;
+        console.log(`🕰️ 감지 간격 변경: ${options.interval}ms`);
+        
+        // 다시 시작하여 새 간격 적용
+        if (AppState.realtimeDetection.enabled) {
+            stopRealtimeDetection();
+            startRealtimeDetection();
+        }
+    }
+    
+    if (typeof options.enabled === 'boolean') {
+        if (options.enabled && !AppState.realtimeDetection.enabled) {
+            startRealtimeDetection();
+        } else if (!options.enabled && AppState.realtimeDetection.enabled) {
+            stopRealtimeDetection();
+        }
+    }
 }
 
 // ===========================
@@ -755,6 +651,9 @@ async function selectVideoFile() {
         showNotification('파일 선택 중 오류가 발생했습니다.', 'error');
     }
 }
+
+// 원본 함수를 다른 이름으로도 저장 (refactored 버전과의 호환을 위해)
+window.selectVideoFile_Original = selectVideoFile;
 
 // ===========================
 // Eagle API 기능
@@ -1021,6 +920,9 @@ async function processVideo(mode) {
     }
 }
 
+// 원본 함수를 다른 이름으로도 저장 (refactored 버전과의 호환을 위해)
+window.processVideo_Original = processVideo;
+
 /**
  * 단일 비디오 처리
  */
@@ -1274,11 +1176,11 @@ function collectSettings() {
     const { elements } = AppState;
     
     return {
-        sensitivity: parseFloat(elements.sensitivity?.value || 0.3),
-        imageFormat: elements.imageFormat?.value || 'png', // 기본값 PNG로 변경
-        quality: parseInt(elements.quality?.value || 8),
-        inHandle: parseInt(elements.inHandle?.value || 3),
-        outHandle: parseInt(elements.outHandle?.value || 3),
+        sensitivity: parseFloat(elements.sensitivitySlider?.value || 0.3),
+        imageFormat: elements.formatSelect?.value || 'png', // 기본값 PNG로 변경
+        quality: parseInt(elements.qualitySlider?.value || 8),
+        inHandle: parseInt(elements.inHandleSlider?.value || 3),
+        outHandle: parseInt(elements.outHandleSlider?.value || 3),
         extractionMethod: elements.extractionMethod?.value || 'unified',
         duplicateHandling: elements.duplicateHandling?.value || 'overwrite',
         useUnifiedExtraction: elements.extractionMethod?.value === 'unified',
@@ -1295,29 +1197,29 @@ function collectSettings() {
  */
 function updateSensitivityValue() {
     const { elements } = AppState;
-    if (elements.sensitivityValue && elements.sensitivity) {
-        elements.sensitivityValue.textContent = elements.sensitivity.value;
+    if (elements.sensitivityValue && elements.sensitivitySlider) {
+        elements.sensitivityValue.textContent = elements.sensitivitySlider.value;
     }
 }
 
 function updateQualityValue() {
     const { elements } = AppState;
-    if (elements.qualityValue && elements.quality) {
-        elements.qualityValue.textContent = elements.quality.value;
+    if (elements.qualityValue && elements.qualitySlider) {
+        elements.qualityValue.textContent = elements.qualitySlider.value;
     }
 }
 
 function updateInHandleValue() {
     const { elements } = AppState;
-    if (elements.inHandleValue && elements.inHandle) {
-        elements.inHandleValue.textContent = `+${elements.inHandle.value}`;
+    if (elements.inHandleValue && elements.inHandleSlider) {
+        elements.inHandleValue.textContent = `+${elements.inHandleSlider.value}`;
     }
 }
 
 function updateOutHandleValue() {
     const { elements } = AppState;
-    if (elements.outHandleValue && elements.outHandle) {
-        elements.outHandleValue.textContent = `-${elements.outHandle.value}`;
+    if (elements.outHandleValue && elements.outHandleSlider) {
+        elements.outHandleValue.textContent = `-${elements.outHandleSlider.value}`;
     }
 }
 
@@ -1346,11 +1248,20 @@ function toggleSmartSelectionOptions() {
 function updateUI() {
     const { elements, selectedFiles, currentVideoFile, isBatchMode, isProcessing } = AppState;
     
-    // 파일 선택 정보
+    // 파일 선택 정보 - 상세 메타데이터 포함
     if (elements.selectedFile) {
-        elements.selectedFile.innerHTML = currentVideoFile 
-            ? `<strong>${currentVideoFile.name}</strong>` 
-            : '<span class="placeholder">Eagle에서 동영상을 선택하세요</span>';
+        if (currentVideoFile) {
+            // 비디오 메타데이터 표시
+            updateVideoFileInfo(currentVideoFile);
+        } else {
+            // 선택된 파일이 없을 때 실시간 감지 상태 표시
+            const detectionStatus = AppState.realtimeDetection.enabled 
+                ? '🔴 실시간 감지 중 - Eagle에서 동영상을 선택하세요' 
+                : '⚪ Eagle에서 동영상을 선택하세요';
+                
+            elements.selectedFile.innerHTML = `<span class="placeholder">${detectionStatus}</span>`;
+            elements.selectedFile.classList.remove('has-file');
+        }
     }
     
     // 배치 정보
@@ -1368,18 +1279,18 @@ function updateUI() {
     
     // 버튼 상태
     const hasFile = !!currentVideoFile;
-    elements.extractFramesBtn.disabled = !hasFile || isProcessing;
-    elements.extractClipsBtn.disabled = !hasFile || isProcessing;
-    elements.processAllBtn.disabled = !hasFile || isProcessing;
-    elements.selectFileBtn.disabled = isProcessing;
+    if (elements.extractFramesBtn) elements.extractFramesBtn.disabled = !hasFile || isProcessing;
+    if (elements.extractClipsBtn) elements.extractClipsBtn.disabled = !hasFile || isProcessing;
+    if (elements.processBtn) elements.processBtn.disabled = !hasFile || isProcessing;
+    if (elements.selectFileBtn) elements.selectFileBtn.disabled = isProcessing;
     
     // 설정 컨트롤 상태
     const settingControls = [
-        elements.sensitivity,
-        elements.imageFormat,
-        elements.quality,
-        elements.inHandle,
-        elements.outHandle,
+        elements.sensitivitySlider,
+        elements.formatSelect,
+        elements.qualitySlider,
+        elements.inHandleSlider,
+        elements.outHandleSlider,
         elements.extractionMethod,
         elements.duplicateHandling
     ];
@@ -1387,6 +1298,219 @@ function updateUI() {
     settingControls.forEach(control => {
         if (control) control.disabled = isProcessing;
     });
+}
+
+/**
+ * 비디오 파일 상세 정보 업데이트
+ * @param {Object} videoFile - 비디오 파일 객체
+ */
+async function updateVideoFileInfo(videoFile) {
+    const { elements } = AppState;
+    
+    try {
+        // 실시간 감지 표시를 위한 상태 표시
+        const detectionStatus = AppState.realtimeDetection.enabled 
+            ? '<span class="detection-status active">🔴 실시간 감지 중</span>' 
+            : '<span class="detection-status inactive">⚪ 실시간 감지 꺼짐</span>';
+        
+        // 기본 파일 정보 표시
+        const basicInfo = `
+            <div class="video-file-info selected">
+                <div class="video-file-header">
+                    <div class="video-file-name" title="${videoFile.name}">
+                        <strong>📹 ${videoFile.name}</strong>
+                        ${detectionStatus}
+                    </div>
+                    <div class="video-file-badges">
+                        <span class="file-ext-badge">${videoFile.ext?.toUpperCase() || 'VIDEO'}</span>
+                        ${videoFile.size ? `<span class="file-size-badge">${formatFileSize(videoFile.size)}</span>` : ''}
+                        ${AppState.isBatchMode ? `<span class="batch-mode-badge">BATCH</span>` : ''}
+                    </div>
+                </div>
+                <div class="video-metadata" id="videoMetadata">
+                    <div class="metadata-loading">
+                        <span class="loading-spinner">⚪</span>
+                        <span>비디오 정보 분석 중...</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        elements.selectedFile.innerHTML = basicInfo;
+        
+        // 선택된 파일이 있을 때 CSS 클래스 추가
+        elements.selectedFile.classList.add('has-file');
+        
+        // 비디오 메타데이터 비동기 로드
+        loadVideoMetadata(videoFile);
+        
+    } catch (error) {
+        console.error('비디오 파일 정보 업데이트 실패:', error);
+        elements.selectedFile.innerHTML = `
+            <div class="video-file-info error">
+                <div class="video-file-name">
+                    <strong>⚠️ ${videoFile.name}</strong>
+                </div>
+                <div class="error-message">파일 정보를 읽을 수 없습니다</div>
+            </div>
+        `;
+        elements.selectedFile.classList.add('has-file');
+    }
+}
+
+/**
+ * 비디오 메타데이터 비동기 로드
+ * @param {Object} videoFile - 비디오 파일 객체
+ */
+async function loadVideoMetadata(videoFile) {
+    const metadataElement = document.getElementById('videoMetadata');
+    if (!metadataElement) return;
+    
+    try {
+        // FFmpeg 의존성 확인
+        const ffmpegReady = await checkFFmpegDependency();
+        if (!ffmpegReady) {
+            metadataElement.innerHTML = `
+                <div class="metadata-error">
+                    <span>⚠️ FFmpeg를 사용할 수 없어 상세 정보를 가져올 수 없습니다</span>
+                </div>
+            `;
+            return;
+        }
+        
+        // FFmpeg 경로 가져오기
+        const ffmpegPaths = await getFFmpegPaths();
+        
+        // VideoAnalyzer 인스턴스 생성 및 메타데이터 추출
+        if (!window.VideoAnalyzer) {
+            throw new Error('VideoAnalyzer 모듈이 로드되지 않았습니다');
+        }
+        
+        const analyzer = new VideoAnalyzer(ffmpegPaths);
+        if (!analyzer.initialized) {
+            await analyzer.initialize();
+        }
+        
+        console.log('🔍 비디오 메타데이터 추출 시작:', videoFile.path);
+        const metadata = await analyzer.getVideoMetadata(videoFile.path);
+        
+        console.log('📊 추출된 메타데이터:', metadata);
+        
+        // 메타데이터 표시
+        displayVideoMetadata(metadata);
+        
+    } catch (error) {
+        console.error('비디오 메타데이터 로드 실패:', error);
+        metadataElement.innerHTML = `
+            <div class="metadata-error">
+                <span>⚠️ 비디오 정보 분석 실패: ${error.message}</span>
+            </div>
+        `;
+    }
+}
+
+/**
+ * 비디오 메타데이터 표시
+ * @param {Object} metadata - 비디오 메타데이터
+ */
+function displayVideoMetadata(metadata) {
+    const metadataElement = document.getElementById('videoMetadata');
+    if (!metadataElement) return;
+    
+    const {
+        duration = 0,
+        width = 0,
+        height = 0,
+        fps = 0,
+        codec = 'unknown',
+        bitrate = 0,
+        frameCount = 0
+    } = metadata;
+    
+    const metadataHTML = `
+        <div class="metadata-grid">
+            <div class="metadata-item">
+                <span class="metadata-label">⏱️ 길이</span>
+                <span class="metadata-value">${formatDuration(duration)}</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">📐 해상도</span>
+                <span class="metadata-value">${width} × ${height}</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">🎞️ 프레임레이트</span>
+                <span class="metadata-value">${fps.toFixed(2)} fps</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">🔧 코덱</span>
+                <span class="metadata-value">${codec}</span>
+            </div>
+            ${bitrate > 0 ? `
+            <div class="metadata-item">
+                <span class="metadata-label">📊 비트레이트</span>
+                <span class="metadata-value">${formatBitrate(bitrate)}</span>
+            </div>
+            ` : ''}
+            ${frameCount > 0 ? `
+            <div class="metadata-item">
+                <span class="metadata-label">🎬 총 프레임</span>
+                <span class="metadata-value">${frameCount.toLocaleString()}개</span>
+            </div>
+            ` : ''}
+        </div>
+    `;
+    
+    metadataElement.innerHTML = metadataHTML;
+}
+
+/**
+ * 파일 크기 포맷팅
+ * @param {number} bytes - 바이트 크기
+ * @returns {string} 포맷된 크기
+ */
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+/**
+ * 시간 포맷팅 (초를 시:분:초로)
+ * @param {number} seconds - 초 단위 시간
+ * @returns {string} 포맷된 시간
+ */
+function formatDuration(seconds) {
+    if (seconds === 0) return '0:00';
+    
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+        return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+}
+
+/**
+ * 비트레이트 포맷팅
+ * @param {number} bitrate - 비트레이트 (bps)
+ * @returns {string} 포맷된 비트레이트
+ */
+function formatBitrate(bitrate) {
+    if (bitrate === 0) return 'unknown';
+    
+    const kbps = bitrate / 1000;
+    const mbps = kbps / 1000;
+    
+    if (mbps >= 1) {
+        return `${mbps.toFixed(1)} Mbps`;
+    } else {
+        return `${kbps.toFixed(0)} kbps`;
+    }
 }
 
 /**
@@ -1818,12 +1942,47 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // 워치독 시스템 시작
                 pluginWatchdog = new PluginWatchdog();
                 
+                // 실시간 감지 즉시 시작
+                if (AppState.isEagleReady) {
+                    console.log('🚀 Eagle 준비 완료 - 실시간 감지 시작');
+                    startRealtimeDetection();
+                    
+                    // 초기 감지 수행
+                    setTimeout(() => {
+                        console.log('🔍 초기 비디오 감지 시도...');
+                        autoDetectSelectedFile();
+                    }, 500);
+                } else {
+                    console.log('⚠️ Eagle API 미준비 - 실시간 감지 대기 중');
+                }
+                
+                // 페이지 언로드 시 정리 작업 등록
+                window.addEventListener('beforeunload', () => {
+                    console.log('🧹 플러그인 정리 작업 시작...');
+                    stopRealtimeDetection();
+                    if (pluginWatchdog) {
+                        pluginWatchdog.stop();
+                    }
+                    console.log('✅ 플러그인 정리 완료');
+                });
+                
                 console.log('✅ Video Processor 플러그인 초기화 완료');
                 
-                // Eagle이 준비되어 있다면 자동 감지
-                if (AppState.isEagleReady) {
-                    // 모듈 로드되면 자동 감지 시도
-                    setTimeout(autoDetectSelectedFile, 500);
+                // 사용자에게 준비 완료 알림
+                showNotification('🚀 Video Processor 준비 완료! Eagle에서 비디오를 선택하세요.', 'success');
+                
+                // Eagle이 준비되어 있다면 자동 감지 
+                if (AppState.isEagleReady && !AppState.realtimeDetection.enabled) {
+                    // 모듈 로드되면 실시간 감지 시작
+                    console.log('🔍 모듈 로드 완료 - 실시간 감지 시작');
+                    startRealtimeDetection();
+                    
+                    setTimeout(() => {
+                        console.log('🔍 초기 파일 감지 시작...');
+                        autoDetectSelectedFile();
+                    }, 1000);
+                } else {
+                    console.log('⚠️ Eagle API 미준비 또는 실시간 감지 이미 활성화됨');
                 }
             } else {
                 console.warn('⚠️ 모듈 로드가 완료되지 않았습니다. 재시도를 기다리는 중...');
@@ -1850,6 +2009,19 @@ window.VideoProcessor = {
     checkCacheStatus,
     openResultsFolder,
     
+    // 실시간 감지 제어
+    realtimeDetection: {
+        start: startRealtimeDetection,
+        stop: stopRealtimeDetection,
+        updateSettings: updateRealtimeDetectionSettings,
+        getStatus: () => ({
+            enabled: AppState.realtimeDetection.enabled,
+            interval: AppState.realtimeDetection.checkInterval,
+            lastSelectionCount: AppState.realtimeDetection.lastSelectionIds.length,
+            currentSelectionCount: AppState.selectedFiles.length
+        })
+    },
+    
     // 상태 접근
     getState: () => AppState,
     
@@ -1863,5 +2035,5 @@ window.VideoProcessor = {
     },
     
     // 디버깅용
-    version: '1.3.0'
+    version: '1.3.1' // 실시간 감지 추가로 버전 업
 };
