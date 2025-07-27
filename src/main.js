@@ -1697,6 +1697,42 @@ async function getFFmpegPaths() {
 // ===========================
 
 /**
+ * 캐시 경로 표시 업데이트
+ */
+async function updateCachePathDisplay() {
+    if (!window.eagleUtils) {
+        console.warn('eagleUtils를 사용할 수 없어 캐시 경로 표시를 업데이트할 수 없습니다.');
+        return;
+    }
+    
+    try {
+        // 동적 캐시 경로 가져오기
+        const clipsPath = await eagleUtils.getCacheDirectory('clips');
+        const framesPath = await eagleUtils.getCacheDirectory('frames');
+        
+        // UI 요소 업데이트
+        const clipsPathElement = document.getElementById('clipsPath');
+        const framesPathElement = document.getElementById('framesPath');
+        
+        if (clipsPathElement) {
+            clipsPathElement.textContent = clipsPath || '현재 Eagle 라이브러리/video-processor-cache/clips';
+        }
+        
+        if (framesPathElement) {
+            framesPathElement.textContent = framesPath || '현재 Eagle 라이브러리/video-processor-cache/frames';
+        }
+        
+        console.log('✅ 캐시 경로 표시 업데이트 완료:', {
+            clips: clipsPath,
+            frames: framesPath
+        });
+        
+    } catch (error) {
+        console.error('캐시 경로 표시 업데이트 실패:', error);
+    }
+}
+
+/**
  * 캐시 상태 확인 (동적 Eagle 라이브러리 경로 지원)
  */
 async function checkCacheStatus() {
@@ -1750,6 +1786,9 @@ async function checkCacheStatus() {
             elements.cacheResultContent.innerHTML = `📊 총 ${totalFiles}개 파일, ${eagleUtils.formatFileSize(totalSize)}<br><small>📁 ${cacheInfo}</small>`;
         }
     }
+    
+    // 캐시 경로 표시 업데이트
+    await updateCachePathDisplay();
 }
 
 /**
@@ -1950,6 +1989,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateOutHandleValue();
                 updateTargetFrameCountValue();
                 updateUI();
+                
+                // 캐시 경로 표시 초기화
+                setTimeout(async () => {
+                    await updateCachePathDisplay();
+                }, 1000);
                 
                 // 워치독 시스템 시작
                 pluginWatchdog = new PluginWatchdog();
