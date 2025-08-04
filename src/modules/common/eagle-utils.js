@@ -461,21 +461,8 @@ class EagleUtils {
         try {
             console.log('🔍 FFmpeg 경로 자동 감지...');
             
-            // 1. Eagle FFmpeg 플러그인 우선 시도
-            if (this.eagle && this.eagle.extraModule && this.eagle.extraModule.ffmpeg) {
-                try {
-                    const isInstalled = await this.eagle.extraModule.ffmpeg.isInstalled();
-                    if (isInstalled) {
-                        const paths = await this.eagle.extraModule.ffmpeg.getPaths();
-                        console.log('✅ Eagle FFmpeg 플러그인에서 경로 가져옴:', paths);
-                        return paths;
-                    } else {
-                        console.log('⚠️ Eagle FFmpeg 플러그인이 설치되지 않았습니다');
-                    }
-                } catch (error) {
-                    console.warn('Eagle FFmpeg 플러그인 확인 실패:', error);
-                }
-            }
+            // 1. Eagle FFmpeg 플러그인은 건너뛰고 시스템 경로 먼저 확인
+            // Eagle FFmpeg 플러그인을 호출하면 정보창이 뜨므로 사용하지 않음
             
             // 2. 시스템 경로 자동 감지
             const detectedPaths = this.detectSystemFFmpegPaths();

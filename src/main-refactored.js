@@ -240,6 +240,9 @@ function setupEventListeners() {
     // 설정 변경 리스너
     setupSettingsListeners();
     
+    // 비디오 병합 드래그앤드롭 리스너
+    setupVideoMergeListeners();
+    
     // 실시간 감지 토글
     if (elements.realtimeToggle) {
         elements.realtimeToggle.addEventListener('change', handleRealtimeToggle);
@@ -1326,14 +1329,10 @@ window.testIndependentOperation = async () => {
         }
         console.log(`⚙️ 설정 관리: ${testResults.settingsManagement ? '✅' : '❌'}`);
         
-        // 5. FFmpeg 가용성 확인 (Eagle API 방식)
+        // 5. FFmpeg 가용성 확인 (시스템 경로만 사용)
         try {
-            if (typeof eagle !== 'undefined' && eagle.extraModule && eagle.extraModule.ffmpeg) {
-                console.log('🦅 Eagle FFmpeg API 감지됨');
-                const isInstalled = await eagle.extraModule.ffmpeg.isInstalled();
-                testResults.ffmpegAvailability = isInstalled;
-                console.log(`🎬 Eagle FFmpeg: ${isInstalled ? '✅ 설치됨' : '⚠️ 미설치 (자동 설치 가능)'}`);
-            } else if (ffmpegManager) {
+            // Eagle FFmpeg API는 정보창을 표시하므로 사용하지 않음
+            if (ffmpegManager) {
                 // 폴백: 기존 방식
                 const dependency = await ffmpegManager.checkDependency();
                 testResults.ffmpegAvailability = dependency.isAvailable;
@@ -1358,5 +1357,653 @@ window.testIndependentOperation = async () => {
         return { ...testResults, error: error.message };
     }
 };
+
+// ===========================
+// 비디오 병합 드래그앤드롭 기능
+// ===========================
+
+// 비디오 파일 목록 (병합용)
+let mergeVideoList = [];
+
+/**
+ * 비디오 병합 리스너 설정
+ */
+function setupVideoMergeListeners() {
+    const dropZone = document.getElementById('videoDropZone');
+    const videoList = document.getElementById('videoList');
+    const videoItems = document.getElementById('videoItems');
+    const clearListBtn = document.getElementById('clearVideoListBtn');
+    const mergeBtn = document.getElementById('mergeVideosBtn');
+    const dropOverlay = document.getElementById('dropOverlay');
+
+    if (!dropZone) {
+        console.warn('⚠️ 비디오 드롭존이 없습니다');
+        return;
+    }
+
+    // 드래그 이벤트 방지 (전체 페이지)
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        document.addEventListener(eventName, preventDefaults, false);
+    });
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    // 드롭존 이벤트
+    dropZone.addEventListener('dragenter', handleDragEnter);
+    dropZone.addEventListener('dragover', handleDragOver);
+    dropZone.addEventListener('dragleave', handleDragLeave);
+    dropZone.addEventListener('drop', handleDrop);
+
+    // 버튼 이벤트
+    if (clearListBtn) {
+        clearListBtn.addEventListener('click', clearVideoList);
+    }
+    
+    if (mergeBtn) {
+        mergeBtn.addEventListener('click', startVideoMerge);
+    }
+
+    console.log('✅ 비디오 병합 리스너 설정 완료');
+}
+
+/**
+ * 드래그 진입
+ */
+function handleDragEnter(e) {
+    e.preventDefault();
+    const dropZone = document.getElementById('videoDropZone');
+    const dropOverlay = document.getElementById('dropOverlay');
+    
+    if (dropZone && hasVideoFiles(e.dataTransfer)) {
+        dropZone.classList.add('drag-over');
+        if (dropOverlay) {
+            dropOverlay.style.display = 'flex';
+        }
+    }
+}
+
+/**
+ * 드래그 오버
+ */
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+}
+
+/**
+ * 드래그 나가기
+ */
+function handleDragLeave(e) {
+    e.preventDefault();
+    const dropZone = document.getElementById('videoDropZone');
+    const dropOverlay = document.getElementById('dropOverlay');
+    
+    // 드롭존을 완전히 벗어났는지 확인
+    if (!dropZone.contains(e.relatedTarget)) {
+        dropZone.classList.remove('drag-over');
+        if (dropOverlay) {
+            dropOverlay.style.display = 'none';
+        }
+    }
+}
+
+/**
+ * 드롭 처리
+ */
+async function handleDrop(e) {
+    e.preventDefault();
+    
+    const dropZone = document.getElementById('videoDropZone');
+    const dropOverlay = document.getElementById('dropOverlay');
+    
+    // UI 초기화
+    if (dropZone) dropZone.classList.remove('drag-over');
+    if (dropOverlay) dropOverlay.style.display = 'none';
+
+    const files = Array.from(e.dataTransfer.files);
+    const videoFiles = files.filter(file => isVideoFile(file));
+
+    if (videoFiles.length === 0) {
+        if (uiController) {
+            uiController.showNotification('비디오 파일만 추가할 수 있습니다', 'warning');
+        }
+        return;
+    }
+
+    // 파일들을 병합 리스트에 추가
+    await addVideosToMergeList(videoFiles);
+}
+
+/**
+ * 비디오 파일 여부 확인 (드래그 중)
+ */
+function hasVideoFiles(dataTransfer) {
+    const types = Array.from(dataTransfer.types);
+    return types.includes('Files');
+}
+
+/**
+ * 비디오 파일 여부 확인
+ */
+function isVideoFile(file) {
+    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm', '.m4v'];
+    const fileName = file.name.toLowerCase();
+    return videoExtensions.some(ext => fileName.endsWith(ext));
+}
+
+/**
+ * 비디오들을 병합 리스트에 추가
+ */
+async function addVideosToMergeList(files) {
+    try {
+        let addedCount = 0;
+        
+        for (const file of files) {
+            // 중복 확인
+            const exists = mergeVideoList.some(video => 
+                video.name === file.name && video.size === file.size
+            );
+            
+            if (!exists) {
+                const videoInfo = {
+                    id: generateVideoId(),
+                    name: file.name,
+                    size: file.size,
+                    path: file.path,
+                    file: file,
+                    duration: null, // 지속 시간 (나중에 추출)
+                    durationLoading: true
+                };
+                
+                mergeVideoList.push(videoInfo);
+                addedCount++;
+                
+                // 비동기로 지속 시간 추출
+                extractVideoDuration(videoInfo);
+            }
+        }
+        
+        // UI 업데이트
+        updateVideoListUI();
+        updateMergeSummary();
+        
+        if (uiController && addedCount > 0) {
+            uiController.showNotification(`${addedCount}개 비디오가 추가되었습니다`, 'success');
+        }
+        
+    } catch (error) {
+        console.error('비디오 리스트 추가 실패:', error);
+        if (uiController) {
+            uiController.showNotification('비디오 추가에 실패했습니다', 'error');
+        }
+    }
+}
+
+/**
+ * 비디오 파일 지속 시간 추출
+ */
+async function extractVideoDuration(videoInfo) {
+    try {
+        console.log(`⏱️ 비디오 지속 시간 추출 시작: ${videoInfo.name}`);
+        
+        // FFmpeg 경로 확인
+        let ffmpegPaths = null;
+        if (ffmpegManager) {
+            ffmpegPaths = await ffmpegManager.getFFmpegPaths();
+        } else {
+            console.warn('FFmpegManager가 없습니다. 기본 ffprobe 사용');
+            ffmpegPaths = { ffprobe: 'ffprobe' }; // 시스템 PATH의 ffprobe 사용
+        }
+        
+        if (!ffmpegPaths || !ffmpegPaths.ffprobe) {
+            throw new Error('FFprobe를 찾을 수 없습니다');
+        }
+        
+        const duration = await getVideoInfoWithFFprobe(videoInfo.path, ffmpegPaths.ffprobe);
+        
+        // 비디오 정보 업데이트
+        videoInfo.duration = duration;
+        videoInfo.durationLoading = false;
+        
+        console.log(`✅ 지속 시간 추출 완료: ${videoInfo.name} = ${duration}초`);
+        
+        // UI 업데이트
+        updateVideoListUI();
+        updateMergeSummary();
+        
+    } catch (error) {
+        console.error(`❌ 지속 시간 추출 실패: ${videoInfo.name}`, error);
+        videoInfo.duration = 0; // 기본값
+        videoInfo.durationLoading = false;
+        
+        // UI 업데이트
+        updateVideoListUI();
+        updateMergeSummary();
+    }
+}
+
+/**
+ * FFprobe로 비디오 정보 추출
+ */
+function getVideoInfoWithFFprobe(videoPath, ffprobePath) {
+    return new Promise((resolve, reject) => {
+        const spawn = window.require ? window.require('child_process').spawn : null;
+        if (!spawn) {
+            reject(new Error('child_process.spawn을 사용할 수 없습니다'));
+            return;
+        }
+        
+        const ffprobe = spawn(ffprobePath, [
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format',
+            videoPath
+        ]);
+        
+        let stdout = '';
+        let stderr = '';
+        
+        ffprobe.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+        
+        ffprobe.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+        
+        ffprobe.on('close', (code) => {
+            if (code === 0 && stdout.trim()) {
+                try {
+                    const data = JSON.parse(stdout);
+                    const duration = parseFloat(data.format.duration) || 0;
+                    resolve(duration);
+                } catch (parseError) {
+                    reject(new Error('비디오 정보 파싱 실패: ' + parseError.message));
+                }
+            } else {
+                reject(new Error('FFprobe 실행 실패: ' + stderr));
+            }
+        });
+        
+        ffprobe.on('error', (error) => {
+            reject(new Error('FFprobe 오류: ' + error.message));
+        });
+    });
+}
+
+/**
+ * 비디오 ID 생성
+ */
+function generateVideoId() {
+    return 'video_' + Math.random().toString(36).substr(2, 9);
+}
+
+/**
+ * 비디오 리스트 UI 업데이트
+ */
+function updateVideoListUI() {
+    const videoList = document.getElementById('videoList');
+    const videoItems = document.getElementById('videoItems');
+    
+    if (!videoList || !videoItems) return;
+    
+    if (mergeVideoList.length === 0) {
+        videoList.style.display = 'none';
+        return;
+    }
+    
+    videoList.style.display = 'block';
+    videoItems.innerHTML = '';
+    
+    mergeVideoList.forEach((video, index) => {
+        const videoItem = createVideoItemElement(video, index);
+        videoItems.appendChild(videoItem);
+    });
+    
+    // 드래그 앤 드롭 재설정
+    setupVideoItemDragAndDrop();
+}
+
+/**
+ * 병합 요약 정보 업데이트
+ */
+function updateMergeSummary() {
+    const totalVideosEl = document.getElementById('totalVideos');
+    const totalDurationEl = document.getElementById('totalDuration');
+    const estimatedSizeEl = document.getElementById('estimatedSize');
+    
+    if (!totalVideosEl || !totalDurationEl || !estimatedSizeEl) return;
+    
+    // 총 비디오 개수
+    totalVideosEl.textContent = `${mergeVideoList.length}개`;
+    
+    // 지속 시간 계산
+    const loadingCount = mergeVideoList.filter(v => v.durationLoading).length;
+    const validDurations = mergeVideoList.filter(v => !v.durationLoading && v.duration !== null);
+    
+    if (loadingCount > 0) {
+        // 아직 로딩 중인 비디오가 있는 경우
+        totalDurationEl.textContent = `계산 중... (${validDurations.length}/${mergeVideoList.length})`;
+        totalDurationEl.className = 'summary-value loading';
+        
+        estimatedSizeEl.textContent = '계산 중...';
+        estimatedSizeEl.className = 'summary-value loading';
+    } else if (validDurations.length === 0) {
+        // 모든 비디오의 지속 시간을 가져오지 못한 경우
+        totalDurationEl.textContent = '알 수 없음';
+        totalDurationEl.className = 'summary-value warning';
+        
+        estimatedSizeEl.textContent = '알 수 없음';
+        estimatedSizeEl.className = 'summary-value warning';
+    } else {
+        // 모든 지속 시간을 성공적으로 가져온 경우
+        const totalSeconds = validDurations.reduce((sum, video) => sum + (video.duration || 0), 0);
+        const formattedDuration = formatDuration(totalSeconds);
+        
+        totalDurationEl.textContent = formattedDuration;
+        totalDurationEl.className = 'summary-value ready';
+        
+        // 5Mbps 기준 파일 크기 계산
+        const estimatedSizeMB = (5 * totalSeconds) / 8; // 5Mbps * 시간 / 8 = MB
+        const formattedSize = formatFileSize(estimatedSizeMB * 1024 * 1024); // MB to bytes
+        
+        estimatedSizeEl.textContent = formattedSize;
+        estimatedSizeEl.className = 'summary-value ready';
+        
+        console.log('📊 병합 예상 정보:', {
+            videos: mergeVideoList.length,
+            totalSeconds: totalSeconds,
+            formattedDuration: formattedDuration,
+            estimatedSizeMB: estimatedSizeMB,
+            formattedSize: formattedSize
+        });
+    }
+}
+
+/**
+ * 지속 시간 포맷팅 (초 -> 시:분:초)
+ */
+function formatDuration(totalSeconds) {
+    if (totalSeconds === 0) return '0초';
+    
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    
+    if (hours > 0) {
+        return `${hours}시간 ${minutes}분 ${seconds}초`;
+    } else if (minutes > 0) {
+        return `${minutes}분 ${seconds}초`;
+    } else {
+        return `${seconds}초`;
+    }
+}
+
+/**
+ * 비디오 아이템 엘리먼트 생성
+ */
+function createVideoItemElement(video, index) {
+    const item = document.createElement('div');
+    item.className = 'video-item';
+    item.draggable = true;
+    item.dataset.videoId = video.id;
+    
+    const sizeText = formatFileSize(video.size);
+    
+    // 지속 시간 표시
+    let durationText = '';
+    if (video.durationLoading) {
+        durationText = '⏱️ 계산 중...';
+    } else if (video.duration !== null && video.duration > 0) {
+        const minutes = Math.floor(video.duration / 60);
+        const seconds = Math.floor(video.duration % 60);
+        durationText = `⏱️ ${minutes}:${seconds.toString().padStart(2, '0')}`;
+    } else {
+        durationText = '⏱️ 알 수 없음';
+    }
+    
+    item.innerHTML = `
+        <div class="video-item-drag-handle">⋮⋮</div>
+        <div class="video-item-index">${index + 1}</div>
+        <div class="video-item-info">
+            <div class="video-item-name">${video.name}</div>
+            <div class="video-item-details">
+                <span class="video-size">${sizeText}</span>
+                <span class="video-duration">${durationText}</span>
+            </div>
+        </div>
+        <button class="video-item-remove" onclick="removeVideoFromList('${video.id}')">
+            ✕
+        </button>
+    `;
+    
+    return item;
+}
+
+/**
+ * 파일 크기 포맷
+ */
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+/**
+ * 비디오 아이템 드래그 앤 드롭 설정
+ */
+function setupVideoItemDragAndDrop() {
+    const videoItems = document.querySelectorAll('.video-item');
+    
+    videoItems.forEach(item => {
+        item.addEventListener('dragstart', handleVideoItemDragStart);
+        item.addEventListener('dragenter', handleVideoItemDragEnter);
+        item.addEventListener('dragover', handleVideoItemDragOver);
+        item.addEventListener('drop', handleVideoItemDrop);
+        item.addEventListener('dragend', handleVideoItemDragEnd);
+    });
+}
+
+let draggedVideoId = null;
+
+/**
+ * 비디오 아이템 드래그 시작
+ */
+function handleVideoItemDragStart(e) {
+    draggedVideoId = e.target.dataset.videoId;
+    e.target.classList.add('dragging');
+}
+
+/**
+ * 비디오 아이템 드래그 진입
+ */
+function handleVideoItemDragEnter(e) {
+    e.preventDefault();
+}
+
+/**
+ * 비디오 아이템 드래그 오버
+ */
+function handleVideoItemDragOver(e) {
+    e.preventDefault();
+    
+    const afterElement = getDragAfterElement(e.target.closest('#videoItems'), e.clientY);
+    const draggingElement = document.querySelector('.dragging');
+    
+    if (afterElement == null) {
+        e.target.closest('#videoItems').appendChild(draggingElement);
+    } else {
+        e.target.closest('#videoItems').insertBefore(draggingElement, afterElement);
+    }
+}
+
+/**
+ * 비디오 아이템 드롭
+ */
+function handleVideoItemDrop(e) {
+    e.preventDefault();
+    
+    // 순서 재정렬
+    reorderVideoList();
+}
+
+/**
+ * 비디오 아이템 드래그 종료
+ */
+function handleVideoItemDragEnd(e) {
+    e.target.classList.remove('dragging');
+    draggedVideoId = null;
+}
+
+/**
+ * 드래그 위치 계산
+ */
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('.video-item:not(.dragging)')];
+    
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+/**
+ * 비디오 리스트 순서 재정렬
+ */
+function reorderVideoList() {
+    const videoItems = document.querySelectorAll('.video-item');
+    const newOrder = [];
+    
+    videoItems.forEach(item => {
+        const videoId = item.dataset.videoId;
+        const video = mergeVideoList.find(v => v.id === videoId);
+        if (video) {
+            newOrder.push(video);
+        }
+    });
+    
+    mergeVideoList = newOrder;
+    updateVideoListUI();
+    updateMergeSummary();
+    
+    console.log('📝 비디오 리스트 순서 재정렬:', mergeVideoList.map(v => v.name));
+}
+
+/**
+ * 비디오 리스트에서 제거
+ */
+function removeVideoFromList(videoId) {
+    mergeVideoList = mergeVideoList.filter(video => video.id !== videoId);
+    updateVideoListUI();
+    updateMergeSummary();
+    
+    if (uiController) {
+        uiController.showNotification('비디오가 제거되었습니다', 'info');
+    }
+}
+
+/**
+ * 비디오 리스트 전체 지우기
+ */
+function clearVideoList() {
+    mergeVideoList = [];
+    updateVideoListUI();
+    updateMergeSummary();
+    
+    if (uiController) {
+        uiController.showNotification('비디오 리스트가 지워졌습니다', 'info');
+    }
+}
+
+/**
+ * 비디오 병합 시작
+ */
+async function startVideoMerge() {
+    if (mergeVideoList.length < 2) {
+        if (uiController) {
+            uiController.showNotification('병합하려면 최소 2개의 비디오가 필요합니다', 'warning');
+        }
+        return;
+    }
+    
+    try {
+        if (uiController) {
+            uiController.showNotification('비디오 병합을 시작합니다...', 'info');
+        }
+        
+        // VideoConcatenator 사용하여 병합
+        if (typeof window.VideoConcatenator === 'function') {
+            const concatenator = new VideoConcatenator();
+            
+            // FFmpeg 경로 설정
+            let ffmpegPaths = null;
+            if (ffmpegManager) {
+                ffmpegPaths = await ffmpegManager.getFFmpegPaths();
+            }
+            
+            // 진행률 콜백
+            const progressCallback = (progress, message) => {
+                if (progressManager) {
+                    progressManager.updateProgress(progress * 100, message);
+                }
+            };
+            
+            // 병합 실행
+            const result = await concatenator.concatenateVideos(
+                mergeVideoList.map(v => ({
+                    name: v.name,
+                    path: v.path
+                })),
+                {
+                    quality: 'high',
+                    audioSync: true
+                },
+                progressCallback,
+                ffmpegPaths
+            );
+            
+            console.log('✅ 비디오 병합 완료:', result);
+            
+            if (uiController) {
+                uiController.showNotification(
+                    `비디오 병합 완료: ${result.filename}`, 
+                    'success'
+                );
+            }
+            
+            // 병합 완료 후 리스트 지우기
+            clearVideoList();
+            
+        } else {
+            throw new Error('VideoConcatenator를 찾을 수 없습니다');
+        }
+        
+    } catch (error) {
+        console.error('❌ 비디오 병합 실패:', error);
+        
+        if (errorHandler) {
+            await errorHandler.handleError(error, 'video_merge', {
+                level: 'error',
+                shouldNotify: true
+            });
+        } else if (uiController) {
+            uiController.showNotification('비디오 병합에 실패했습니다: ' + error.message, 'error');
+        }
+    }
+}
+
+// 전역 함수로 등록 (HTML에서 사용)
+window.removeVideoFromList = removeVideoFromList;
 
 console.log('📦 Video Processor Eagle Plugin - Refactored Main 로드 완료');

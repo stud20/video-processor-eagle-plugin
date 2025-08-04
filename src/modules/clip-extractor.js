@@ -429,34 +429,41 @@ class ClipExtractor {
                 }
                 
                 // 블랙프레임 방지를 위한 정확한 프레임 추출
-                // -ss를 반드시 -i 뒤에 배치하여 정확한 프레임 추출
+                // -ss를 반드시 -i 뒤에 배치하여 정확한 프레임 추출 (5Mbps 타겟 설정)
                 const ffmpegArgs = [
                     '-i', videoPath,
                     '-ss', adjustedCutPoint.start.toFixed(3),
                     '-t', adjustedCutPoint.duration.toFixed(3),
                     '-c:v', 'libx264',
-                    '-c:a', 'copy',  // 오디오 스트림 복사 (속도 향상)
-                    '-crf', '18',  // 고정 고품질 설정
+                    '-b:v', '5M',          // 타겟 비트레이트 5Mbps
+                    '-maxrate', '5M',      // 최대 비트레이트 5Mbps
+                    '-bufsize', '10M',     // 버퍼 크기 10MB (maxrate의 2배)
                     '-preset', 'medium',
+                    '-profile:v', 'high',  // 고품질 프로파일
                     '-pix_fmt', 'yuv420p',
-                    '-bf', '0',  // B-frame 비활성화 (블랙프레임 방지)
-                    '-g', '25',  // GOP 고정 (FPS 기반)
-                    '-sc_threshold', '0',  // 씨즘 변경 비활성화
+                    '-bf', '0',            // B-frame 완전 비활성화 (블랙프레임 방지)
+                    '-fflags', '+genpts',  // PTS 재생성으로 타임스탬프 정확도
                     '-movflags', '+faststart',
-                    '-fflags', '+genpts',  // 타임스탬프 재생성 (필수)
+                    '-c:a', 'copy',        // 오디오 스트림 복사
                     '-threads', '1',
                     '-y',
                     outputPath
                 ];
 
+                // 파일 크기 예측 (5Mbps 기준)
+                const estimatedSizeMB = (5 * adjustedCutPoint.duration) / 8; // 5Mbps * 시간 / 8 = MB
+                const formattedSize = estimatedSizeMB < 1024 ? 
+                    `${Math.round(estimatedSizeMB * 100) / 100}MB` : 
+                    `${Math.round(estimatedSizeMB / 1024 * 100) / 100}GB`;
+
                 // 진단용 로깅
-                console.log(`🔧 클립 ${clipIndex} 추출 (No Black Frame):`, {
+                console.log(`🔧 클립 ${clipIndex} 추출 (5Mbps 타겟):`, {
                     start: adjustedCutPoint.start.toFixed(3),
                     duration: adjustedCutPoint.duration.toFixed(3),
                     originalDuration: cutPoint.duration.toFixed(3),
-                    method: 'black-frame-prevention',
+                    estimatedSize: formattedSize,
+                    method: '5mbps-target-bitrate',
                     bframes: 'disabled',
-                    gop: 'fixed-25',
                     args: ffmpegArgs.join(' ')
                 });
 

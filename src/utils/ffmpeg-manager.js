@@ -39,10 +39,10 @@ class FFmpegManager {
         try {
             console.log('🔍 Eagle FFmpeg 플러그인 확인 시작...');
             
-            // 1. Eagle FFmpeg 플러그인 사용 시도
-            if (typeof eagle !== 'undefined' && eagle.extraModule && eagle.extraModule.ffmpeg) {
-                return await this.initializeWithEagleAPI();
-            }
+            // 1. Eagle FFmpeg 플러그인은 건너뛰기 (정보창 표시 방지)
+            // if (typeof eagle !== 'undefined' && eagle.extraModule && eagle.extraModule.ffmpeg) {
+            //     return await this.initializeWithEagleAPI();
+            // }
             
             // 2. eagleUtils 폴백
             if (window.eagleUtils && typeof window.eagleUtils.getFFmpegPaths === 'function') {

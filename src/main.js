@@ -1647,22 +1647,9 @@ function showBatchResults(batchResults, totalTime, cancelled) {
  */
 async function checkFFmpegDependency() {
     try {
-        if (typeof eagle?.extraModule?.ffmpeg === 'undefined') {
-            console.warn('Eagle extraModule.ffmpeg를 사용할 수 없습니다.');
-            return false;
-        }
-        
-        const isInstalled = await eagle.extraModule.ffmpeg.isInstalled();
-        
-        if (!isInstalled) {
-            console.log('FFmpeg 의존성을 설치하고 있습니다...');
-            showNotification('FFmpeg 의존성을 설치하고 있습니다...', 'info');
-            
-            await eagle.extraModule.ffmpeg.install();
-            showNotification('FFmpeg 의존성 설치가 완료되었습니다.', 'success');
-            return true;
-        }
-        
+        // Eagle FFmpeg API 사용하지 않음 (정보창 표시 방지)
+        // 시스템 FFmpeg를 직접 사용
+        console.log('시스템 FFmpeg 사용');
         return true;
     } catch (error) {
         console.error('FFmpeg 의존성 확인 실패:', error);
@@ -1675,20 +1662,27 @@ async function checkFFmpegDependency() {
  */
 async function getFFmpegPaths() {
     try {
-        if (typeof eagle?.extraModule?.ffmpeg === 'undefined') {
-            throw new Error('Eagle extraModule.ffmpeg를 사용할 수 없습니다.');
+        // Eagle FFmpeg 플러그인 사용하지 않고 시스템 경로 사용
+        // (Eagle FFmpeg 플러그인 호출 시 정보창이 뜨는 문제 회피)
+        
+        // eagleUtils 사용 가능한 경우
+        if (window.eagleUtils && typeof window.eagleUtils.getFFmpegPaths === 'function') {
+            return await window.eagleUtils.getFFmpegPaths();
         }
         
-        const paths = await eagle.extraModule.ffmpeg.getPaths();
-        console.log('FFmpeg 바이너리 경로:', paths);
-        
+        // 기본 시스템 경로 사용
+        console.log('FFmpeg 기본 시스템 경로 사용');
         return {
-            ffmpeg: paths.ffmpeg,
-            ffprobe: paths.ffprobe
+            ffmpeg: 'ffmpeg',
+            ffprobe: 'ffprobe'
         };
     } catch (error) {
         console.error('FFmpeg 경로 가져오기 실패:', error);
-        throw error;
+        // 오류 시에도 기본 경로 반환
+        return {
+            ffmpeg: 'ffmpeg',
+            ffprobe: 'ffprobe'
+        };
     }
 }
 

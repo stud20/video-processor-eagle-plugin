@@ -43,6 +43,74 @@
                 </div>
             </section>
 
+            <!-- 비디오 병합 섹션 -->
+            <section class="video-merge">
+                <h2>🔗 비디오 병합</h2>
+                <div class="merge-container">
+                    <div class="drop-zone" id="videoDropZone">
+                        <div class="drop-zone-content">
+                            <div class="drop-icon">📹</div>
+                            <p class="drop-text">비디오 파일을 드래그해서 놓으세요</p>
+                            <p class="drop-subtext">순서대로 병합됩니다</p>
+                        </div>
+                        <div class="drop-zone-overlay" id="dropOverlay" style="display: none;">
+                            <div class="drop-overlay-text">
+                                <div class="drop-overlay-icon">⬇️</div>
+                                <p>여기에 놓으세요!</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="video-list" id="videoList" style="display: none;">
+                        <div class="video-list-header">
+                            <h3>병합할 비디오 목록</h3>
+                            <button class="btn btn-sm btn-outline" id="clearVideoListBtn">
+                                🗑️ 모두 지우기
+                            </button>
+                        </div>
+                        
+                        <!-- 병합 예상 정보 -->
+                        <div class="merge-summary" id="mergeSummary">
+                            <div class="summary-item">
+                                <div class="summary-icon">🎬</div>
+                                <div class="summary-info">
+                                    <div class="summary-label">총 동영상</div>
+                                    <div class="summary-value" id="totalVideos">0개</div>
+                                </div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="summary-icon">⏱️</div>
+                                <div class="summary-info">
+                                    <div class="summary-label">총 재생시간</div>
+                                    <div class="summary-value" id="totalDuration">계산 중...</div>
+                                </div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="summary-icon">💾</div>
+                                <div class="summary-info">
+                                    <div class="summary-label">예상 크기</div>
+                                    <div class="summary-value" id="estimatedSize">계산 중...</div>
+                                </div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="summary-icon">⚡</div>
+                                <div class="summary-info">
+                                    <div class="summary-label">품질</div>
+                                    <div class="summary-value">5Mbps</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="video-items" id="videoItems"></div>
+                        <div class="merge-actions">
+                            <button class="btn btn-primary" id="mergeVideosBtn">
+                                🔗 비디오 병합 시작
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- 실행 버튼 섹션 -->
             <section class="actions">
                 <h2>🚀 실행</h2>

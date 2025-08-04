@@ -1388,3 +1388,371 @@ section {
         flex: 1;
     }
 }
+
+/* ===== 비디오 병합 스타일 ===== */
+.video-merge {
+    margin-bottom: 30px;
+}
+
+.merge-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* 드래그앤드롭 영역 */
+.drop-zone {
+    position: relative;
+    min-height: 120px;
+    border: 2px dashed #4a5568;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(26, 32, 44, 0.8), rgba(45, 55, 72, 0.6));
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.drop-zone:hover {
+    border-color: #4299e1;
+    background: linear-gradient(135deg, rgba(66, 153, 225, 0.1), rgba(26, 32, 44, 0.9));
+    transform: translateY(-2px);
+}
+
+.drop-zone.drag-over {
+    border-color: #48bb78;
+    background: linear-gradient(135deg, rgba(72, 187, 120, 0.1), rgba(26, 32, 44, 0.9));
+    border-style: solid;
+    transform: scale(1.02);
+}
+
+.drop-zone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px;
+    text-align: center;
+    height: 100%;
+}
+
+.drop-icon {
+    font-size: 3em;
+    margin-bottom: 15px;
+    opacity: 0.7;
+}
+
+.drop-text {
+    font-size: 1.1em;
+    font-weight: 500;
+    color: #e2e8f0;
+    margin-bottom: 5px;
+}
+
+.drop-subtext {
+    font-size: 0.9em;
+    color: #a0aec0;
+    margin: 0;
+}
+
+/* 드롭 오버레이 */
+.drop-zone-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(72, 187, 120, 0.9);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.drop-overlay-text {
+    text-align: center;
+    color: white;
+}
+
+.drop-overlay-icon {
+    font-size: 3em;
+    margin-bottom: 10px;
+    animation: bounce 1s infinite;
+}
+
+@keyframes bounce {
+    0%, 20%, 50%, 80%, 100% {
+        transform: translateY(0);
+    }
+    40% {
+        transform: translateY(-10px);
+    }
+    60% {
+        transform: translateY(-5px);
+    }
+}
+
+/* 비디오 리스트 */
+.video-list {
+    background: rgba(26, 32, 44, 0.8);
+    border-radius: 12px;
+    border: 1px solid #4a5568;
+    padding: 20px;
+}
+
+.video-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 15px;
+}
+
+.video-list-header h3 {
+    color: #e2e8f0;
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.video-items {
+    margin-bottom: 20px;
+}
+
+.video-item {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 12px;
+    background: #2d3748;
+    border-radius: 8px;
+    border: 1px solid #4a5568;
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+    cursor: grab;
+}
+
+.video-item:hover {
+    background: #374151;
+    border-color: #4299e1;
+}
+
+.video-item:active {
+    cursor: grabbing;
+}
+
+.video-item.dragging {
+    opacity: 0.5;
+    transform: rotate(5deg);
+}
+
+.video-item-drag-handle {
+    color: #a0aec0;
+    font-size: 1.2em;
+    cursor: grab;
+}
+
+.video-item-drag-handle:hover {
+    color: #4299e1;
+}
+
+.video-item-index {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: #4299e1;
+    color: white;
+    border-radius: 50%;
+    font-weight: bold;
+    font-size: 0.9em;
+}
+
+.video-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.video-item-name {
+    font-weight: 500;
+    color: #e2e8f0;
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.video-item-details {
+    font-size: 0.85em;
+    color: #a0aec0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.video-size {
+    color: #a0aec0;
+}
+
+.video-duration {
+    color: #4299e1;
+    font-weight: 500;
+}
+
+.video-item-remove {
+    padding: 6px 8px;
+    background: transparent;
+    border: 1px solid #f56565;
+    color: #f56565;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.8em;
+}
+
+.video-item-remove:hover {
+    background: #f56565;
+    color: white;
+}
+
+/* 병합 예상 정보 */
+.merge-summary {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: rgba(45, 55, 72, 0.8);
+    border-radius: 8px;
+    border: 1px solid #4a5568;
+}
+
+.summary-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    background: rgba(26, 32, 44, 0.6);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.summary-item:hover {
+    background: rgba(26, 32, 44, 0.8);
+    transform: translateY(-1px);
+}
+
+.summary-icon {
+    font-size: 1.2em;
+    width: 24px;
+    text-align: center;
+}
+
+.summary-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.summary-label {
+    font-size: 0.8em;
+    color: #a0aec0;
+    margin-bottom: 2px;
+}
+
+.summary-value {
+    font-size: 0.9em;
+    font-weight: 600;
+    color: #e2e8f0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.summary-value.loading {
+    color: #4299e1;
+}
+
+.summary-value.ready {
+    color: #48bb78;
+}
+
+.summary-value.warning {
+    color: #ed8936;
+}
+
+/* 병합 액션 */
+.merge-actions {
+    display: flex;
+    justify-content: center;
+    padding-top: 10px;
+    border-top: 1px solid #4a5568;
+}
+
+/* 드래그 앤 드롭 플레이스홀더 */
+.drag-placeholder {
+    height: 60px;
+    border: 2px dashed #4299e1;
+    border-radius: 8px;
+    background: rgba(66, 153, 225, 0.1);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4299e1;
+    font-size: 0.9em;
+}
+
+/* 비디오 병합 진행률 */
+.merge-progress {
+    margin-top: 20px;
+    padding: 15px;
+    background: rgba(26, 32, 44, 0.8);
+    border-radius: 8px;
+    border: 1px solid #4a5568;
+}
+
+.merge-progress-text {
+    color: #e2e8f0;
+    margin-bottom: 10px;
+    font-size: 0.9em;
+}
+
+.merge-progress-bar {
+    height: 8px;
+    background: #2d3748;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.merge-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4299e1, #48bb78);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+/* 반응형 스타일 */
+@media (max-width: 768px) {
+    .video-item {
+        gap: 10px;
+        padding: 10px;
+    }
+    
+    .video-item-index {
+        width: 25px;
+        height: 25px;
+        font-size: 0.8em;
+    }
+    
+    .drop-zone-content {
+        padding: 20px;
+    }
+    
+    .drop-icon {
+        font-size: 2.5em;
+    }
+    
+    .video-list-header {
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+    }
+}
